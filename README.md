@@ -29,6 +29,7 @@ Data layer only (Understat and FPL). No modelling is included in this repository
 | `pipeline/07_fetch_fpl_history.py` | FPL history 2016-17 onward from the vaastav archive |
 | `pipeline/08_build_fpl_tables.py` | unified tables in `data/fpl/` (player-match, player ids, snapshot history, teams, events, fixtures, rules) |
 | `pipeline/09_validate_fpl.py` | FPL QC, plus recovery of the scoring rules per season from the data (`docs/FPL_QC.md`, `docs/FPL_RULES.md`) |
+| `pipeline/10_crosswalk_fpl_understat.py` | FPL <-> Understat crosswalk: fixtures (kickoff + score), teams (vote, one-to-one), players (name + minutes assignment, consolidated into a persistent FPL `code` -> Understat `player_id` map); report in `docs/CROSSWALK_QC.md` |
 | `pipeline/config.py` | paths, league list, column schemas |
 | `docs/data_fetch_log.jsonl` | provenance: when each league-season was fetched, with package version |
 | `docs/dedup_log.csv` | audit trail of rows removed by the cleaning step |

@@ -104,7 +104,8 @@ def build_live():
     fx = fx.drop(columns=["stats"], errors="ignore").assign(season=season)
     fx.to_csv(OUT / "fpl_fixtures.csv", index=False)
 
-    ids = pd.DataFrame(boot["elements"])[["id", "code", "opta_code", "web_name", "element_type", "team"]]
+    ids = pd.DataFrame(boot["elements"])[["id", "code", "opta_code", "first_name", "second_name",
+                                          "web_name", "element_type", "team"]]
     ids = ids.rename(columns={"id": "element", "team": "team_id"})
     ids["position"] = ids.element_type.map(POS)
     ids.insert(0, "season", season)
@@ -145,7 +146,7 @@ def build_history(skip_season):
             continue
         d = read_csv_any(sdir / "gws" / "merged_gw.csv")
         raw = read_csv_any(sdir / "players_raw.csv")
-        ids = raw[["id", "code", "web_name", "element_type", "team"]].rename(
+        ids = raw[["id", "code", "first_name", "second_name", "web_name", "element_type", "team"]].rename(
             columns={"id": "element", "team": "team_id"})
         if "opta_code" in raw.columns:
             ids["opta_code"] = raw["opta_code"]
