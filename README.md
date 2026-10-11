@@ -30,6 +30,8 @@ Data layer only (Understat and FPL). No modelling is included in this repository
 | `pipeline/08_build_fpl_tables.py` | unified tables in `data/fpl/` (player-match, player ids, snapshot history, teams, events, fixtures, rules) |
 | `pipeline/09_validate_fpl.py` | FPL QC, plus recovery of the scoring rules per season from the data (`docs/FPL_QC.md`, `docs/FPL_RULES.md`) |
 | `pipeline/10_crosswalk_fpl_understat.py` | FPL <-> Understat crosswalk: fixtures (kickoff + score), teams (vote, one-to-one), players (name + minutes assignment, consolidated into a persistent FPL `code` -> Understat `player_id` map); report in `docs/CROSSWALK_QC.md` |
+| `model_v1/pi_rating_model.py` | dual attack/defence pi-rating model with a Dixon-Coles score matrix (Constantinou and Fenton style updates, xG/goals blend) |
+| `pipeline/11_pi_ratings_to_fpl.py` | replays the model over all matches, records pre-match attack/defence ratings, and attaches them to every FPL fixture (played and upcoming) with expected goals, P(clean sheet) and goals-conceded distribution; report in `docs/PI_RATINGS_QC.md`. **Needs a fitted parameter file and `matches_unified.csv` under `data/interim/merged/model_v1/`, produced by the model-fitting scripts, which are not yet in this repository.** |
 | `pipeline/config.py` | paths, league list, column schemas |
 | `docs/data_fetch_log.jsonl` | provenance: when each league-season was fetched, with package version |
 | `docs/dedup_log.csv` | audit trail of rows removed by the cleaning step |

@@ -5,6 +5,9 @@
 !/requirements.txt
 !/understat_MANIFEST.sha256
 !/pipeline/
+!/model_v1/
+/model_v1/*
+!/model_v1/pi_rating_model.py
 !/docs/
 
 # inside the allowed folders, still exclude local-only work and caches
