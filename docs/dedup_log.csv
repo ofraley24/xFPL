@@ -1,0 +1,9 @@
+league,table,season,match_id,rows_removed
+La_liga,player_match_stats,2023,23028,30
+La_liga,player_match_stats,2025,29482,32
+La_liga,player_match_stats,2026,30804,29
+La_liga,shots,2025,29482,23
+La_liga,shots,2026,30804,23
+RFPL,player_match_stats,2025,28374,29
+RFPL,shots,2022,20154,1
+RFPL,shots,2025,28374,1

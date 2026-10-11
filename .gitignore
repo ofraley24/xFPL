@@ -1,0 +1,17 @@
+# Allowlist: only the data extraction/cleaning layer is tracked.
+/*
+!/.gitignore
+!/README.md
+!/requirements.txt
+!/understat_MANIFEST.sha256
+!/pipeline/
+!/docs/
+
+# inside the allowed folders, still exclude local-only work and caches
+/pipeline/03_*.py
+/pipeline/04_*.py
+/docs/ARCHIVE_LOG.md
+/docs/KNOWN_ISSUES.md
+__pycache__/
+*.pyc
+.DS_Store
