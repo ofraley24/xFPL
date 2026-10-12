@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Evaluation ratings with COVID / drift adjustments whose settings are chosen AS OF each season.
+
+Hyperparameters: fitted before 2019-08-01 (10_fit_pi_params_pre2019.py). Closed-doors home advantage:
+online (n0 = 50), always on. The two drift rates (league scoring level, crowd home advantage) are chosen
+for each FPL season S by walk-forward Poisson NLL on the two seasons BEFORE S (replay over all data
+before S). Seasons up to 2018-19 use the pre-2019 choice. 2025-26 and 2026-27 use the choice made
+before 2025-26. Each season's FPL fixture ratings are then taken from a replay with that season's
+settings, so every rating is one that could have been computed at the time.
+Output: data/ratings_eval/fpl_team_fixture_ratings.csv (+ selection table in docs/).
+"""
+import importlib.util
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from scipy.stats import poisson
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "pipeline"))
+sp = importlib.util.spec_from_file_location("r11", ROOT / "pipeline" / "11_pi_ratings_to_fpl.py")
+R11 = importlib.util.module_from_spec(sp)
+sp.loader.exec_module(R11)
+PARAMS = ROOT / "data/interim/pre2019/fitted_params_pre2019.json"
+DRIFT = (0.001, 0.002, 0.004)
+HA = (0.0, 0.0005, 0.001, 0.002, 0.004)
+
+
+def main():
+    params = json.load(open(PARAMS))
+    m = R11.load_matches_with_clock()   # FPL kickoff clock for EPL; same ordering as the ratings script
+    sel = {}
+    for y in range(2019, 2026):
+        start = pd.Timestamp(f"{y}-08-01")
+        hist_d = m[m.t < start].reset_index(drop=True)
+        score = hist_d.t >= pd.Timestamp(f"{y-2}-08-01")
+        best = None
+        for dl in DRIFT:
+            for ha in HA:
+                _, h = R11.replay(hist_d, params, params["rho"], bcd=True, bcd_prior_n=50, drift_lr=dl, ha_lr=ha)
+                nll = -(poisson.logpmf(hist_d.home_goals[score], h.lam[score]).sum()
+                        + poisson.logpmf(hist_d.away_goals[score], h.mu[score]).sum())
+                if best is None or nll < best[0]:
+                    best = (nll, dl, ha)
+        sel[y] = (best[1], best[2])
+        print(f"season {y}-{str(y+1)[2:]}: chosen drift_lr={best[1]} ha_lr={best[2]} (NLL on {score.sum()} matches)", flush=True)
+    sel_tab = pd.DataFrame([{"season": f"{y}-{str(y+1)[2:]}", "drift_lr": v[0], "ha_lr": v[1]} for y, v in sel.items()])
+    sel_tab.to_csv(ROOT / "docs" / "ratings_asof_selection.csv", index=False)
+    # seasons <= 2018-19: pre-2019 choice (drift chosen pre-2019 in 16_covid_team_eval.py = 0.002, ha = 0)
+    combos = {(0.002, 0.0)} | set(sel.values())
+    outs = {}
+    for dl, ha in combos:
+        tag = f"d{dl}_h{ha}"
+        out = ROOT / "data" / "ratings_tmp" / tag
+        subprocess.run([sys.executable, str(ROOT / "pipeline/11_pi_ratings_to_fpl.py"), "--params", str(PARAMS),
+                        "--label", f"pre2019+covid({tag})", "--out", str(out), "--bcd", "--drift-lr", str(dl),
+                        "--ha-lr", str(ha)], check=True, capture_output=True)
+        outs[(dl, ha)] = pd.read_csv(out / "fpl_team_fixture_ratings.csv")
+    pieces = []
+    seasons = sorted(outs[(0.002, 0.0)].season.unique())
+    for s in seasons:
+        y = int(s[:4])
+        key = (0.002, 0.0) if y < 2019 else sel[min(y, 2025)]
+        t = outs[key]
+        pieces.append(t[t.season == s])
+    allr = pd.concat(pieces, ignore_index=True)
+    dst = ROOT / "data" / "ratings_eval"
+    dst.mkdir(exist_ok=True)
+    allr.to_csv(dst / "fpl_team_fixture_ratings.csv", index=False)
+    print(allr.groupby("season").params_label.first().to_string())
+
+
+if __name__ == "__main__":
+    main()

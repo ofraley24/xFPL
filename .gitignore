@@ -1,4 +1,4 @@
-# Allowlist: only the data extraction/cleaning layer is tracked.
+# Allowlist: data pipeline, model code, analysis scripts, figures and reports are tracked; data is not.
 /*
 !/.gitignore
 !/README.md
@@ -8,13 +8,16 @@
 !/model_v1/
 /model_v1/*
 !/model_v1/pi_rating_model.py
+!/model_v1/01_build_dataset.py
+!/analysis/
+!/figures/
 !/docs/
 
 # inside the allowed folders, still exclude local-only work and caches
-/pipeline/03_*.py
 /pipeline/04_*.py
 /docs/ARCHIVE_LOG.md
 /docs/KNOWN_ISSUES.md
 __pycache__/
 *.pyc
 .DS_Store
+/docs/PI_RATINGS_QC_*.md
