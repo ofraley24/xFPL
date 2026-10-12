@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Full xP model: component models + nested Monte-Carlo assembly with explicit uncertainty.
 
-Walk-forward: test seasons 2019-20 .. 2024-25, each fold trained on all earlier seasons (>= 2016-17).
-Sealed 2025-26 and live 2026-27 are not read. Evaluation universe: players with minutes in their
-previous <= 10 fixtures (97% of real appearances); every other row is predicted as 0 points.
+TARGET: FPL points GIVEN THAT THE PLAYER STARTS (--unconditional: all players with minutes in their previous
+<= 10 fixtures). Walk-forward: development folds 2019-20 .. 2024-25, each trained on all earlier seasons
+(>= 2016-17); --sealed scores 2025-26 and --live 2026-27, each trained on everything before it.
+Options: --slope (linear calibration instead of the spline), --no-cal (no calibration), --reuse-minutes
+(reuse the cached minutes-model predictions). Output: data/analysis/xp_predictions_<mode>[_variant].parquet.
 
 COMPONENTS (statsmodels GLMs unless stated; Poisson with offset log(minutes/90); the coefficient on
 log(minutes/90) lets rates scale non-linearly with minutes)
@@ -13,17 +15,24 @@ log(minutes/90) lets rates scale non-linearly with minutes)
   penalties    attempts (taker fraction) x conversion (Beta posterior); misses = attempts - scored
   assists      team lambda, xA fraction (split-half EB), opponent lambda, home, price, ownership
   conceded     goals conceded while on the pitch; clean sheet = 60+ min and 0 conceded
-  saves, penalty saves (GKP); yellow, red, own goals (all)
-  bonus        multinomial logit for 0/1/2/3 CONDITIONAL on the match events (goals, assists, clean
-               sheet, saves, conceded ...) + the player's lagged BPS rate; sampled AFTER the events in
-               each simulation, so bonus correlates with goals/clean sheets as it does in reality
+               (one full-match draw per team, shared by team-mates and thinned to their minutes)
+  saves, penalty saves (GKP); own goals (all)
+  yellow, red  binary GLMs, complementary log-log link (P = 1 - exp(-lambda)); yellow also uses the league
+               yellow rate over the previous 365 days
+  calibration  walk-forward: log E[goals], log E[assists] = natural cubic spline in the log point-estimate
+               index, fitted on earlier out-of-sample seasons only
+  bonus        ranked WITHIN the match: Plackett-Luce on the BPS order, scores linear in the simulated match
+               events (goals, assists, clean sheet, saves, conceded ...) + the player's lagged BPS rate;
+               3/2/1 to the top three in every draw, with BPS ties and substitutes at training rates, so each
+               match hands out the right bonus total and team-mates compete for it
 
 UNCERTAINTY
   epistemic: J parameter draws. Each draw takes (i) GLM coefficients ~ MVN(beta_hat, Cov), (ii) the
              player's talent fractions from their EB posterior (sd = sqrt(sigma2/(T+k))), (iii) team
-             log-lambda + N(0, s_team^2), s_team estimated from over-dispersion of team goals around
-             lambda in training, (iv) a minutes-ensemble member, (v) penalty conversion ~ Beta, (vi)
-             bonus-model coefficients ~ MVN
+             log-lambda + N(0, s_team^2) (one draw per team and match: a team's attack draw is its opponent's
+             defence draw), s_team from over-dispersion of team goals around lambda in training, (iv) a
+             minutes-ensemble member, (v) penalty conversion ~ Beta, (vi) bonus-model and calibration
+             coefficients ~ MVN. Draws on the log scale are centred (- sd^2 beta^2 / 2) so mean rates are kept
   aleatoric: R outcome draws per parameter draw (minutes, events, bonus)
   Per row: xP = mean of J*R points; var_epi = Var_j(mean_r) - E_j(Var_r)/R; var_total = Var(all).
 """
@@ -34,6 +43,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from patsy import build_design_matrices, dmatrix
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 warnings.filterwarnings("ignore")
@@ -83,7 +93,25 @@ def load(max_season="2024-25"):
                                                                               "team_a_score"]).drop_duplicates(["season", "fixture"])
     d = d.merge(pm, on=["season", "fixture"], how="left")
     d["team_goals"] = np.where(d.was_home, d.team_h_score, d.team_a_score)
+    d["log_lg_yel"] = league_yellow_rate(d)
     return d
+
+
+def league_yellow_rate(d, days=365):
+    """log league yellow cards per 90 over the `days` before each row's deadline (kickoffs strictly earlier).
+    Deadlines with under ~50 matches of history (early 2016-17, training rows only) take the first value
+    that has it."""
+    k = d.kickoff_time.to_numpy()
+    o = np.argsort(k, kind="mergesort")
+    ks = k[o]
+    cy = np.concatenate([[0.0], np.cumsum(d.yellow_cards.to_numpy(float)[o])])
+    cm = np.concatenate([[0.0], np.cumsum(d.minutes.to_numpy(float)[o])])
+    dl = np.unique(d.deadline.to_numpy())
+    hi = np.searchsorted(ks, dl, side="left")
+    lo = np.searchsorted(ks, dl - np.timedelta64(days, "D"), side="left")
+    mins = cm[hi] - cm[lo]
+    rate = pd.Series(np.where(mins >= 50 * 22 * 90, 90 * (cy[hi] - cy[lo]) / np.maximum(mins, 1), np.nan), index=dl).bfill()
+    return np.log(rate.reindex(d.deadline.to_numpy()).to_numpy())
 
 
 def shrunk_log(num, den, prior, k):
@@ -165,10 +193,13 @@ GLM_SPECS = {
     "saves": dict(rows="gk", y="saves", x=["log_lama", "log_lamf", "home", "log_sv90"]),
     # keepers nearly always play 90: the minutes term is unidentified (estimate +14), so it is dropped
     "pen_saved": dict(rows="gk", y="penalties_saved", x=["log_lama"], logmin=False),
-    "yellow": dict(rows="app", y="yellow_cards", x=["pos_DEF", "pos_MID", "pos_FWD", "log_yel90", "log_lama", "home"]),
+    # cards are 0/1 per match (a second yellow is a red): binary GLM with cloglog link, P = 1 - exp(-lambda),
+    # which is exactly what the simulator draws (Poisson(lambda) > 0)
+    "yellow": dict(rows="app", y="yellow_cards", binary=True,
+                   x=["pos_DEF", "pos_MID", "pos_FWD", "log_yel90", "log_lama", "home", "log_lg_yel"]),
     # a red card SHORTENS minutes (reverse causality: estimate -1.2), so no minutes elasticity; no position
     # dummies (rare event, separation)
-    "red": dict(rows="app", y="red_cards", x=["log_red90", "log_yel90"], logmin=False),
+    "red": dict(rows="app", y="red_cards", x=["log_red90", "log_yel90"], logmin=False, binary=True),
     "own_goal": dict(rows="app", y="own_goals", x=["pos_DEF", "pos_MID", "pos_FWD", "log_lama"]),
 }
 EB_COLS = ["log_fr_shots_540", "log_quality_540", "log_fr_xa_540"]
@@ -183,15 +214,61 @@ def fit_glm(df, spec):
     if spec.get("logmin", True):
         X["log_minutes"] = np.log(df.e)
     y = df[spec["y"]].astype(float)
-    res = sm.GLM(y, X, family=sm.families.Poisson(), offset=np.log(df.e)).fit()
+    if spec.get("binary"):
+        fam = sm.families.Binomial(link=sm.families.links.CLogLog())
+        y = (y > 0).astype(float)
+    else:
+        fam = sm.families.Poisson()
+    res = sm.GLM(y, X, family=fam, offset=np.log(df.e)).fit()
     out = {"names": list(X.columns), "beta": res.params.to_numpy(), "cov": res.cov_params().to_numpy()}
     if spec.get("exclude_gk"):
         out["gk_rate"] = (gk[spec["y"]].sum() + 0.5) / (gk.e.sum() + 50.0)   # per 90, lightly smoothed
     return out
 
 
+def expected_hat(fit, X, Pm, mbar):
+    """Point-estimate expected count over the minutes distribution (index used by the calibration slope)."""
+    names = fit["names"]
+    cols = [c for c in names if c != "log_minutes"]
+    b = fit["beta"][: len(names)]
+    eta = X[cols].to_numpy(float) @ b[[names.index(c) for c in cols]]
+    blm = b[names.index("log_minutes")] if "log_minutes" in names else 0.0
+    m = np.clip(mbar[1:], 1e-6, None) / 90.0
+    e = (Pm[:, 1:] * np.exp(eta[:, None] + (1 + blm) * np.log(m)[None, :])).sum(1)
+    if "gk_rate" in fit:
+        gk = (X.position == "GKP").to_numpy()
+        e[gk] = fit["gk_rate"] * (Pm[gk, 1:] * m[None, :]).sum(1)
+    return e
+
+
+def fit_slope(pool, comp_col, target, idx_new, kind="linear"):
+    """Walk-forward calibration of a component's point-estimate index on earlier out-of-sample rows:
+    log E[observed] = f(log index), f linear (a + b log index) or a natural cubic spline with knots at the
+    50/90/98% quantiles of the pool's log index (linear beyond its range). Returns the coefficients, their
+    covariance and the basis evaluated at the new rows' index."""
+    p_ = pool[(pool[comp_col] > 0) & pool[target].notna()]
+    li = np.log(p_[comp_col].to_numpy())
+    li_new = np.log(np.clip(idx_new, 1e-6, None))
+    if kind == "linear":
+        B, B_new = sm.add_constant(li), sm.add_constant(li_new, has_constant="add")
+    else:
+        lo, hi = li.min(), li.max()
+        kn = tuple(np.quantile(li, [0.5, 0.9, 0.98]))
+        D = dmatrix(f"cr(x, knots={kn}, lower_bound={lo}, upper_bound={hi})", {"x": li}, return_type="matrix")
+        B = np.asarray(D)
+        # beyond the pool's range: continue linearly in log index from the boundary (slope from the edge)
+        xc = np.clip(li_new, lo, hi)
+        B_new = np.asarray(build_design_matrices([D.design_info], {"x": xc})[0])
+        h = 1e-3 * (hi - lo)
+        at = lambda x: np.asarray(build_design_matrices([D.design_info], {"x": np.array([x])})[0])
+        d_lo, d_hi = (at(lo + h) - at(lo)) / h, (at(hi) - at(hi - h)) / h
+        B_new = B_new + np.minimum(li_new - lo, 0)[:, None] * d_lo + np.maximum(li_new - hi, 0)[:, None] * d_hi
+    r = sm.GLM(p_[target].to_numpy(float), B, family=sm.families.Poisson()).fit()
+    return np.asarray(r.params), np.asarray(r.cov_params()), B_new
+
+
 BONUS_X = ["g1", "g2p", "a1", "a2p", "cs_def", "cs_mid", "m60", "sv3", "conc2p", "pensv", "yel", "pos_DEF", "pos_MID",
-           "pos_FWD", "log_bps90"]
+           "pos_FWD", "log_bps90", "goals_mid", "goals_fwd"]
 
 
 def bonus_design(goals, assists, cs, m60, sv3, conc, pensv, yel, pos_def, pos_mid, pos_fwd, log_bps90):
@@ -199,20 +276,123 @@ def bonus_design(goals, assists, cs, m60, sv3, conc, pensv, yel, pos_def, pos_mi
     gk_or_def = 1 - pos_mid - pos_fwd
     return np.stack([np.minimum(goals, 1), np.maximum(goals - 1, 0), np.minimum(assists, 1), np.maximum(assists - 1, 0),
                      cs * gk_or_def, cs * pos_mid, m60, sv3, np.maximum(conc - 1, 0) * gk_or_def, pensv, yel,
-                     pos_def, pos_mid, pos_fwd, log_bps90], axis=-1)
+                     pos_def, pos_mid, pos_fwd, log_bps90,
+                     goals * pos_mid, goals * pos_fwd], axis=-1)   # BPS per goal: GKP/DEF 12, MID 18, FWD 24
 
 
-def fit_bonus(a, F):
+N_SLOT = 5   # BPS positions tracked for bonus (ties and substitutes can push the third bonus to position 5)
+
+
+def bonus_rows(a, F):
+    """Actual-event design for the ranking model on appearances `a` (rows of training or earlier seasons)."""
     pdf = a.position
-    Xb = bonus_design(a.goals_scored.to_numpy(float), a.assists.to_numpy(float), a.clean_sheets.to_numpy(float),
-                      (a.minutes >= 60).to_numpy(float), (a.saves // 3).to_numpy(float), a.goals_conceded.to_numpy(float),
-                      a.penalties_saved.to_numpy(float), a.yellow_cards.to_numpy(float), (pdf == "DEF").to_numpy(float),
-                      (pdf == "MID").to_numpy(float), (pdf == "FWD").to_numpy(float), F.loc[a.index, "log_bps90"].to_numpy())
-    X = sm.add_constant(Xb, has_constant="add")
-    y = a.bonus.clip(0, 3).astype(int).to_numpy()
-    res = sm.MNLogit(y, X).fit(method="newton", maxiter=100, disp=0)
-    # params: (p, 3) for classes 1..3 vs 0; cov_params is ordered as params.ravel(order="F")
-    return {"beta": np.asarray(res.params), "cov": np.asarray(res.cov_params())}
+    f = lambda c: a[c].to_numpy(float)
+    pm, pf = (pdf == "MID").to_numpy(float), (pdf == "FWD").to_numpy(float)
+    Xb = bonus_design(f("goals_scored"), f("assists"), f("clean_sheets"), (a.minutes >= 60).to_numpy(float),
+                      (a.saves // 3).to_numpy(float), f("goals_conceded"), f("penalties_saved"), f("yellow_cards"),
+                      (pdf == "DEF").to_numpy(float), pm, pf, F.loc[a.index, "log_bps90"].to_numpy())
+    fx = (a.season + "_" + a.fixture.astype(str)).to_numpy()
+    return Xb, fx
+
+
+def fit_pl(X, fx, bps, offset=None, prior_sd=10.0):
+    """Plackett-Luce (rank-ordered logit) for the top three of the BPS order within each fixture; score = X beta
+    + offset. Damped Newton with a weak N(0, prior_sd^2) prior (braces nearly always top the BPS)."""
+    offset = np.zeros(len(X)) if offset is None else offset
+    o = np.lexsort((-bps, fx))
+    X, fc, off = X[o], fx[o], offset[o]
+    starts = np.flatnonzero(np.r_[True, fc[1:] != fc[:-1]])
+    sizes = np.diff(np.r_[starts, len(fc)])
+    ok = sizes >= 3
+    G, M, p = ok.sum(), sizes.max(), X.shape[1]
+    Xg, Og, mask = np.zeros((G, M, p)), np.zeros((G, M)), np.zeros((G, M), bool)
+    for g, (s0, n0) in enumerate(zip(starts[ok], sizes[ok])):
+        Xg[g, :n0], Og[g, :n0], mask[g, :n0] = X[s0:s0 + n0], off[s0:s0 + n0], True   # rows 0-2 = BPS 1st-3rd
+    prior_prec = 1 / prior_sd ** 2
+
+    def pl(beta, deriv=True):
+        ll, grad, H = -0.5 * prior_prec * beta @ beta, -prior_prec * beta, prior_prec * np.eye(p)
+        avail = mask.copy()
+        s = Xg @ beta + Og
+        for k in range(3):
+            sk = np.where(avail, s, -np.inf)
+            mx = sk.max(1, keepdims=True)
+            lse = mx[:, 0] + np.log(np.exp(sk - mx).sum(1))
+            ll += (s[:, k] - lse).sum()
+            if deriv:
+                pk = np.exp(sk - lse[:, None])
+                xbar = np.einsum("gm,gmp->gp", pk, Xg)
+                grad += (Xg[:, k] - xbar).sum(0)
+                H += np.einsum("gm,gmp,gmq->pq", pk, Xg, Xg) - xbar.T @ xbar
+            avail[:, k] = False
+        return ll, grad, H
+
+    beta = np.zeros(p)
+    ll, grad, H = pl(beta)
+    for _ in range(100):
+        step, t = np.linalg.solve(H, grad), 1.0
+        while pl(beta + t * step, False)[0] < ll and t > 1e-6:     # backtracking line search
+            t /= 2
+        beta = beta + t * step
+        ll_new, grad, H = pl(beta)
+        if abs(ll_new - ll) < 1e-8:
+            break
+        ll = ll_new
+    return beta, np.linalg.inv(H)
+
+
+def fit_bonus(a, F, cond_start, rng):
+    """Bonus is a ranking WITHIN the match: 3/2/1 to the top three by BPS. Plackett-Luce for the top three of
+    the BPS order among the candidates the simulator sees (starters if conditional on starting), with scores
+    linear in the match events. Also returns the training rates of BPS ties between consecutive positions and,
+    if conditional on starting, of a substitute holding each position; the simulator applies both, so bonus
+    totals per match match the data."""
+    a = a[a.minutes > 0]
+    Xb, fx = bonus_rows(a, F)
+    bps = a.bps.to_numpy(float) + rng.random(len(a)) * 1e-3          # random tie-break for the order
+    st = a.started.to_numpy() == 1
+    o = np.lexsort((-bps, fx))
+    fxo, bpo, sto = fx[o], np.floor(bps[o]), st[o]
+    first = np.r_[True, fxo[1:] != fxo[:-1]]
+    pos_in = np.arange(len(o)) - np.maximum.accumulate(np.where(first, np.arange(len(o)), 0))
+    tie, sub = np.zeros(N_SLOT - 1), np.zeros(N_SLOT)
+    for k in range(N_SLOT):
+        at = np.flatnonzero(pos_in == k)
+        sub[k] = 0.0 if not cond_start else (~sto[at]).mean()
+        if k < N_SLOT - 1:
+            nxt = at[(at + 1 < len(o))]
+            nxt = nxt[fxo[nxt + 1] == fxo[nxt]]
+            tie[k] = (bpo[nxt] == bpo[nxt + 1]).mean()
+    keep = st if cond_start else np.ones(len(a), bool)
+    beta, cov = fit_pl(Xb[keep], fx[keep], bps[keep])
+    return {"beta": beta, "cov": cov, "tie": tie, "sub": sub}
+
+
+def allocate_bonus(score, fix_codes, played, tie_u, sub_u, tie, sub):
+    """3/2/1 by rank within each fixture for every draw. score (n, J, R) with Gumbel noise already added.
+    BPS slots 1..N_SLOT: a slot is taken by a substitute with prob sub[k]; consecutive slots tie with prob
+    tie[k]; bonus follows FPL's competition ranking (tie for 1st: 3, 3, 1; for 2nd: 3, 2, 2; ...)."""
+    bonus = np.zeros(score.shape, dtype=np.int64)
+    score = np.where(played, score, -np.inf)
+    is_sub = sub_u < sub[:, None, None]                               # (N_SLOT, J, R)
+    st_idx = np.cumsum(~is_sub, 0) - 1                                 # which starter fills each slot
+    rank = np.ones(is_sub.shape, dtype=np.int64)
+    for k in range(1, N_SLOT):
+        rank[k] = np.where(tie_u[k - 1] < tie[k - 1], rank[k - 1], k + 1)
+    pts = np.select([rank == 1, rank == 2, rank == 3], [3, 2, 1], 0)
+    for f in np.unique(fix_codes):
+        rows = np.flatnonzero(fix_codes == f)
+        top = np.argsort(-score[rows], axis=0)[:N_SLOT]                 # (<=N_SLOT, J, R) starter order
+        nt = top.shape[0]
+        for k in range(N_SLOT):
+            ok = (~is_sub[k]) & (st_idx[k] < nt) & (pts[k] > 0)
+            if not ok.any():
+                continue
+            who = np.take_along_axis(top, np.clip(st_idx[k], 0, nt - 1)[None], 0)[0]   # (J, R)
+            jj, rr = np.nonzero(ok)
+            alive = np.isfinite(score[rows[who[jj, rr]], jj, rr])
+            np.add.at(bonus, (rows[who[jj, rr]][alive], jj[alive], rr[alive]), pts[k][jj, rr][alive])
+    return bonus
 
 
 def team_sigma(tr):
@@ -289,43 +469,67 @@ def rate_matrix(fit, Xrow, betas, eb_noise, lam_noise):
     base = Xrow[[c for c in names if c != "log_minutes"]].to_numpy(float)          # (n, p-1)
     bidx = [i for i, c in enumerate(names) if c != "log_minutes"]
     eta = base @ betas[:, bidx].T                                                     # (n, J)
+    # the GLMs were fitted on posterior means (EB fractions) and point lambdas, so their fitted rates already
+    # average over that uncertainty; the draws are centred (- beta^2 sd^2 / 2) to keep the mean rate unchanged
     for c in names:
         j = names.index(c)
+        b = betas[:, j][None, :]
         if c in eb_noise:
-            eta += eb_noise[c] * betas[:, j][None, :]
+            eta += eb_noise[c][0] * b - 0.5 * (eb_noise[c][1] * b) ** 2
         if c in lam_noise:
-            eta += lam_noise[c] * betas[:, j][None, :]
+            eta += lam_noise[c][0] * b - 0.5 * (lam_noise[c][1] * b) ** 2
     b_lm = betas[:, names.index("log_minutes")] if "log_minutes" in names else np.zeros(len(betas))
     return np.clip(eta, -20, 3), b_lm
 
 
-def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team, season, rng, dc=None):
+def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team, season, rng, dc=None,
+                  slope=None, ehat=None):
+    # whole fixtures per chunk (bonus is allocated within the match; team noise is shared within it)
+    orig_index = te.index
+    order = np.argsort(te.fixture.to_numpy(), kind="stable")
+    te, F, S, Pmin = te.iloc[order], F.iloc[order], S.iloc[order], Pmin[:, order]
+    ehat = {k: v[order] for k, v in (ehat or {}).items()}
+    slope = {k: (v[0], v[1], v[2][order]) for k, v in (slope or {}).items()}
+    if dc is not None:
+        dc = {**dc, "X": dc["X"][order]}
     n = len(te)
+    fixv = te.fixture.to_numpy()
+    homev = te.was_home.to_numpy().astype(int)
     pos = te.position.to_numpy()
     out = {k: np.zeros(n) for k in ("xp", "var_total", "var_epi", "q10", "q25", "q50", "q75", "q90", "p_ge2", "p_ge5",
                                      "p_ge10", "cdf_lo", "cdf_hi")}
     y_act = te.total_points.to_numpy(float)   # used ONLY to read the predictive CDF at the outcome (for PIT)
     comp = {k: np.zeros(n) for k in ("e_app", "e_goals", "e_assists", "e_cs", "e_gc_pts", "e_saves_pts", "e_bonus",
                                       "e_yellow", "e_red", "e_og", "e_pen_miss", "e_pen_saved", "e_minutes", "p_play",
-                                      "p60", "e_dc")}
+                                      "p60", "e_dc", "p_g1", "p_g2")}
     dc_on = dc is not None and season >= "2025-26"   # defensive-contribution points exist from 2025-26
     Xall = pd.concat([te, F], axis=1)
     Xall = Xall.loc[:, ~Xall.columns.duplicated()]
     Xall["const"] = 1.0
     CH = 400
-    for s in range(0, n, CH):
-        sl = slice(s, min(s + CH, n))
+    bounds, cur = [], 0
+    for b in list(np.flatnonzero(fixv[1:] != fixv[:-1]) + 1) + [n]:
+        if b - cur >= CH or b == n:
+            bounds.append(slice(cur, b))
+            cur = b
+    for sl in bounds:
         X = Xall.iloc[sl]
         nn = len(X)
         # ---- epistemic draws shared across components within a parameter draw
-        eb_noise = {c: S[c].to_numpy()[sl][:, None] * rng.standard_normal((nn, J)) for c in EB_COLS}
-        lam_noise = {c: s_team * rng.standard_normal((nn, J)) for c in LAMBDA_COLS}
+        eb_noise = {c: (S[c].to_numpy()[sl][:, None] * rng.standard_normal((nn, J)), S[c].to_numpy()[sl][:, None])
+                    for c in EB_COLS}
+        # team log-lambda noise: one draw per team and match; a team's attack draw is its opponent's defence draw
+        tk, ok_ = fixv[sl] * 2 + homev[sl], fixv[sl] * 2 + 1 - homev[sl]
+        keys = np.unique(np.r_[tk, ok_])
+        Z = s_team * rng.standard_normal((len(keys), J))
+        lam_noise = {"log_lamf": (Z[np.searchsorted(keys, tk)], s_team),
+                     "log_lama": (Z[np.searchsorted(keys, ok_)], s_team)}
         betas = {k: draw_beta(f, rng, J) for k, f in fits.items()}
         etas = {k: rate_matrix(fits[k], X, betas[k], eb_noise, lam_noise) for k in fits}
         conv = rng.beta(conv_ab[0], conv_ab[1], size=J)
-        bb = rng.multivariate_normal(bonus_fit["beta"].ravel(order="F"), bonus_fit["cov"],
-                                     size=J, method="cholesky").reshape(J, -1, 3, order="F")   # (J, p, 3)
+        gam = rng.multivariate_normal(bonus_fit["beta"], bonus_fit["cov"], size=J, method="cholesky")   # (J, p)
         member = np.arange(J) % B_MIN
+        sl_draw = {k: rng.multivariate_normal(v[0], v[1], size=J) for k, v in slope.items()}
         # ---- minutes: (nn, J, R)
         P = Pmin[member][:, sl, :].transpose(1, 0, 2)                                    # (nn, J, K)
         cum = P.cumsum(-1)
@@ -346,14 +550,24 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
             v = np.where(played, np.exp(eta[:, :, None] + (1 + blm)[None, :, None] * loge), 0.0)
             if "gk_rate" in fits[key]:
                 v = np.where(is_gk_, fits[key]["gk_rate"] * e, v)
+            if key in sl_draw:   # walk-forward calibration: rate x exp(f(log index)) / index
+                f_ = slope[key][2][sl] @ sl_draw[key].T                                     # (nn, J)
+                li = np.log(np.clip(ehat[key][sl], 1e-6, None))[:, None]
+                v = v * np.exp(f_ - li)[:, :, None]
             return np.minimum(v, 20.0)
 
         g_open = rng.poisson(lam("goal_open"))
         pen_att = rng.poisson(lam("pen_att"))
         pen_g = rng.binomial(pen_att, conv[None, :, None])
+        pen_miss = pen_att - pen_g
         goals = g_open + pen_g
         assists = rng.poisson(lam("assist"))
-        conc = rng.poisson(lam("conceded"))
+        # goals conceded: ONE full-match draw per team, shared by team-mates (so clean sheets are shared, as in
+        # reality), thinned binomially to each player's minutes (mean = the fitted on-pitch rate)
+        full = np.minimum(np.exp(etas["conceded"][0]), 20.0)                             # (nn, J) 90-minute rate
+        _, first, inv = np.unique(tk, return_index=True, return_inverse=True)
+        C = rng.poisson(np.broadcast_to(full[first][:, :, None], (len(first), J, R)))[inv]
+        conc = rng.binomial(C, np.clip(lam("conceded") / full[:, :, None], 0, 1))
         is_gk = (pos[sl] == "GKP")[:, None, None]
         saves = np.where(is_gk, rng.poisson(lam("saves")), 0)
         pensv = np.where(is_gk, rng.poisson(lam("pen_saved")), 0)
@@ -362,20 +576,16 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
         og = rng.poisson(lam("own_goal"))
         m60 = (mins >= 60).astype(int)
         cs = (m60 * (conc == 0)).astype(int)
-        # ---- bonus, conditional on the simulated events
+        # ---- bonus: ranked within the match, conditional on the simulated events
         pdf = pos[sl]
         Xb = bonus_design(goals, assists, cs, m60, saves // 3, conc, pensv, yel,
                           np.broadcast_to((pdf == "DEF")[:, None, None], goals.shape).astype(float),
                           np.broadcast_to((pdf == "MID")[:, None, None], goals.shape).astype(float),
                           np.broadcast_to((pdf == "FWD")[:, None, None], goals.shape).astype(float),
                           np.broadcast_to(F["log_bps90"].to_numpy()[sl][:, None, None], goals.shape))
-        Xb = np.concatenate([np.ones(goals.shape + (1,)), Xb], -1)                       # (nn,J,R,p)
-        logits = np.einsum("njrp,jpc->njrc", Xb, bb)
-        logits = np.concatenate([np.zeros(goals.shape + (1,)), logits], -1)
-        pb = np.exp(logits - logits.max(-1, keepdims=True))
-        pb /= pb.sum(-1, keepdims=True)
-        bonus = (rng.random(goals.shape)[..., None] > pb.cumsum(-1)).sum(-1).clip(0, 3)
-        bonus = np.where(played, bonus, 0)
+        score = np.einsum("njrp,jp->njr", Xb, gam) + rng.gumbel(size=goals.shape)
+        bonus = allocate_bonus(score, fixv[sl], played, rng.random((N_SLOT - 1, J, R)), rng.random((N_SLOT, J, R)),
+                               bonus_fit["tie"], bonus_fit["sub"])
         # ---- points under the season's rules
         gpts = np.vectorize(RULES["goal"].get)(pdf)[:, None, None]
         if season >= "2026-27":   # rule change published by the API: goalkeeper goal = 10
@@ -394,7 +604,7 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
             thr = np.where(pdf == "DEF", 10, 12)[:, None, None]
             dc_hit = ((D >= thr) & played & (pdf != "GKP")[:, None, None]).astype(int)
         pts = (app + gpts * goals + 3 * assists + cspts * cs + gcp * (conc // 2) + saves // 3 + 5 * pensv
-               - 2 * (pen_att - pen_g) - yel - 3 * red - 2 * og + bonus + 2 * dc_hit)
+               - 2 * pen_miss - yel - 3 * red - 2 * og + bonus + 2 * dc_hit)
         flat = pts.reshape(nn, -1)
         out["xp"][sl] = flat.mean(1)
         out["var_total"][sl] = flat.var(1)
@@ -409,11 +619,11 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
         out["cdf_hi"][sl] = (flat <= ya).mean(1)
         for key, arr in (("e_app", app), ("e_goals", goals), ("e_assists", assists), ("e_cs", cs),
                          ("e_gc_pts", gcp * (conc // 2)), ("e_saves_pts", saves // 3), ("e_bonus", bonus),
-                         ("e_yellow", yel), ("e_red", red), ("e_og", og), ("e_pen_miss", pen_att - pen_g),
+                         ("e_yellow", yel), ("e_red", red), ("e_og", og), ("e_pen_miss", pen_miss),
                          ("e_pen_saved", pensv), ("e_minutes", mins), ("p_play", played), ("p60", m60),
-                         ("e_dc", dc_hit)):
+                         ("e_dc", dc_hit), ("p_g1", goals >= 1), ("p_g2", goals >= 2)):
             comp[key][sl] = arr.reshape(nn, -1).mean(1)
-    return pd.DataFrame({**out, **comp}, index=te.index)
+    return pd.DataFrame({**out, **comp}, index=te.index).loc[orig_index]
 
 
 # ------------------------------------------------------------------ main
@@ -424,8 +634,12 @@ def main():
     cond_start = "--unconditional" not in sys.argv   # default: xP GIVEN THE PLAYER STARTS
     mode = "sealed" if sealed else "live" if live else "dev"
     folds = ["2025-26"] if sealed else ["2026-27"] if live else TEST
-    tag = mode + ("" if cond_start else "_uncond")
-    rng = np.random.default_rng(SEED + (1 if sealed else 2 if live else 0) + (10 if cond_start else 0))
+    # calibration of the goal / assist index: spline (default), --slope (linear) or --no-cal (none)
+    use_slope = "--no-cal" not in sys.argv
+    curve = use_slope and "--slope" not in sys.argv
+    cal = "" if curve else "_slope" if use_slope else "_nocal"
+    tag = mode + ("" if cond_start else "_uncond") + cal
+    variant = cal
     d = load("2025-26" if sealed else "2026-27" if live else "2024-25")
     print(f"RUN {tag}: folds {folds}; conditional on starting: {cond_start}", flush=True)
     print(f"rows {len(d):,}; universe share {d.universe.mean():.3f}", flush=True)
@@ -434,7 +648,11 @@ def main():
           f"{((a_chk.clean_sheets == 1) == (a_chk.goals_conceded == 0)).mean():.4f}", flush=True)
     H = EB.split_half_table(EB.player_seasons())
     results, coefs = [], []
+    cache = OUT / "cache"
+    cache.mkdir(exist_ok=True)
     for ts in folds:
+        # common random numbers: every variant uses the same seed for the same fold
+        rng = np.random.default_rng(SEED + 7 * int(ts[:4]) + (10 if cond_start else 0))
         if cond_start:
             tr, te = d[d.season < ts], d[(d.season == ts) & (d.started == 1)]
         else:
@@ -453,9 +671,12 @@ def main():
             rows = app if spec["rows"] == "app" else app[app.position == "GKP"]
             rows = rows[rows[spec["y"]].notna()]
             fits[name] = fit_glm(rows, spec)
-            coefs.append(pd.DataFrame({"fold": ts, "component": name, "term": fits[name]["names"],
+            terms = fits[name]["names"]
+            coefs.append(pd.DataFrame({"fold": ts, "component": name, "term": terms,
                                        "beta": fits[name]["beta"], "se": np.sqrt(np.diag(fits[name]["cov"]))}))
-        bonus_fit = fit_bonus(app, Ftr)
+        bonus_fit = fit_bonus(app, Ftr, cond_start, np.random.default_rng(SEED + int(ts[:4])))
+        coefs.append(pd.DataFrame({"fold": ts, "component": "bonus_rank", "term": BONUS_X, "beta": bonus_fit["beta"],
+                                   "se": np.sqrt(np.diag(bonus_fit["cov"]))}))
         pa, pg = app.tgt_pen_att.sum(), app.tgt_pen_goals.sum()
         conv_ab = (pg + 1, pa - pg + 1)
         s_team = team_sigma(tr)
@@ -465,8 +686,14 @@ def main():
         else:
             utr = tr[tr.universe]
             mfeats = MIN_FEATS
-        members = fit_minutes(utr, rng, mfeats)
-        Pmin = predict_minutes(members, te, mfeats)
+        cfile = cache / f"pmin_{'start' if cond_start else 'uncond'}_{ts}.npy"
+        if "--reuse-minutes" in sys.argv and cfile.exists():
+            Pmin = np.load(cfile)
+            assert Pmin.shape[1] == len(te), "minutes cache does not match the test rows"
+        else:
+            members = fit_minutes(utr, rng, mfeats)
+            Pmin = predict_minutes(members, te, mfeats)
+            np.save(cfile, Pmin)
         bucket_vals = {k: utr.minutes[utr.bucket == k].to_numpy(float) for k in range(1, K)}
         dc = None
         if ts >= "2025-26":
@@ -474,7 +701,33 @@ def main():
             dc = {"fit": dcfit, "X": dc_design(te, dcfit["prior"]).to_numpy()}
             coefs.append(pd.DataFrame({"fold": ts, "component": "defensive_contribution", "term": dcfit["names"],
                                        "beta": dcfit["beta"], "se": np.sqrt(np.diag(dcfit["cov"]))}))
-        res = simulate_fold(te, Fte, Ste, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team, ts, rng, dc=dc)
+        Xte = pd.concat([te, Fte], axis=1)
+        Xte = Xte.loc[:, ~Xte.columns.duplicated()].assign(const=1.0)
+        mbar = np.array([0.0] + [bucket_vals[k].mean() for k in range(1, K)])
+        Pm = Pmin.mean(0)
+        ehat = {"goal_open": expected_hat(fits["goal_open"], Xte, Pm, mbar),
+                "assist": expected_hat(fits["assist"], Xte, Pm, mbar)}
+        slope = None
+        if use_slope:
+            prior = [r_ for r_ in results]
+            if mode != "dev":   # earlier OOS predictions of the same variant from the development run(s)
+                for f_ in ([f"dev{variant}"] + ([f"sealed{variant}"] if live else [])):
+                    fp = OUT / f"xp_predictions_{f_}.parquet"
+                    if fp.exists():
+                        prior.append(pd.read_parquet(fp))
+            pool = pd.concat(prior) if prior else None
+            if pool is not None and len(pool):
+                pool = pool[pool.season < ts]
+                kind = "spline" if curve else "linear"
+                slope = {"goal_open": fit_slope(pool, "ehat_goal_open", "tgt_np_goals", ehat["goal_open"], kind),
+                         "assist": fit_slope(pool, "ehat_assist", "assists", ehat["assist"], kind)}
+                fx_ = {k: np.exp(v[2] @ v[0]).mean() / ehat[k].mean() for k, v in slope.items()}
+                print(f"  {ts}: {kind} calibration from {len(pool):,} earlier out-of-sample rows; mean factor goals "
+                      f"{fx_['goal_open']:.3f}, assists {fx_['assist']:.3f}", flush=True)
+        rng_sim = np.random.default_rng(SEED + 7 * int(ts[:4]) + 1000)   # same simulation stream for every variant
+        res = simulate_fold(te, Fte, Ste, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team, ts, rng_sim, dc=dc,
+                            slope=slope, ehat=ehat)
+        res["ehat_goal_open"], res["ehat_assist"] = ehat["goal_open"], ehat["assist"]
         res["minutes_ens_sd_pplay"] = (1 - Pmin[:, :, 0]).std(0)
         results.append(pd.concat([te, Fte.add_prefix("feat_")], axis=1).join(res))
         print(f"  fold {ts}: s_team={s_team:.3f} conv={pg/pa:.3f} rows={len(te):,} "

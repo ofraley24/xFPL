@@ -8,7 +8,7 @@ Rows evaluated: 8,360 player-fixtures in which the player STARTED. The model con
 
 |                           |    bias |   RMSE |    MAE |   within-GW Spearman |   top-10 by GW: mean actual pts |
 |:--------------------------|--------:|-------:|-------:|---------------------:|--------------------------------:|
-| this model                |  0.0804 | 3.0854 | 2.373  |               0.2008 |                          5.2684 |
+| this model                |  0.0445 | 3.0841 | 2.3688 |               0.2029 |                          5.3895 |
 | FPL xP (vaastav)          | -2.7076 | 4.3092 | 3.1615 |               0.5138 |                          4.6789 |
 | form: mean of last 5      | -0.7295 | 3.5726 | 2.5868 |               0.0793 |                          4.3316 |
 | points per start (last 5) | -0.0122 | 3.4091 | 2.5557 |               0.0783 |                          4.1211 |
@@ -17,64 +17,61 @@ All evaluated rows (2025-26):
 
 |                           |    bias |   RMSE |    MAE |   within-GW Spearman |   top-10 by GW: mean actual pts |
 |:--------------------------|--------:|-------:|-------:|---------------------:|--------------------------------:|
-| this model                |  0.0804 | 3.0854 | 2.373  |               0.2008 |                          5.2684 |
+| this model                |  0.0445 | 3.0841 | 2.3688 |               0.2029 |                          5.3895 |
 | points per start (last 5) | -0.0122 | 3.4091 | 2.5557 |               0.0783 |                          4.1211 |
 
-Fig 1: 96% of the 25 bins' 95% CIs contain the bin's mean prediction.
+Fig 1: 84% of the 25 bins' 95% CIs contain the bin's mean prediction.
 
 ## Calibration across feature bins (Fig 2)
 
-86% of 50 bins have a 95% CI that contains the mean prediction. Bins where it does not:
+92% of 50 bins have a 95% CI that contains the mean prediction. Bins where it does not:
 
 | feature            | bin     |    n |   pred |   obs |   ratio obs/pred | CI contains pred   |
 |:-------------------|:--------|-----:|-------:|------:|-----------------:|:-------------------|
-| position           | GKP     |  760 |  3.578 | 3.364 |            0.94  | False              |
-| price band (£m)    | 5.6-6.5 | 1496 |  3.98  | 3.801 |            0.955 | False              |
-| price band (£m)    | >10     |  107 |  6.711 | 5.636 |            0.84  | False              |
-| minutes last match | 60-89   | 1678 |  3.713 | 3.512 |            0.946 | False              |
-| gameweek           | 6-13    | 1760 |  3.716 | 3.547 |            0.954 | False              |
-| season             | 2025-26 | 8360 |  3.705 | 3.625 |            0.978 | False              |
-| fixtures in GW     | single  | 8140 |  3.701 | 3.623 |            0.979 | False              |
+| position           | GKP     |  760 |  3.572 | 3.364 |            0.942 | False              |
+| price band (£m)    | 5.6-6.5 | 1496 |  3.967 | 3.801 |            0.958 | False              |
+| minutes last match | 60-89   | 1678 |  3.69  | 3.512 |            0.952 | False              |
+| gameweek           | 6-13    | 1760 |  3.677 | 3.547 |            0.965 | False              |
 
 ## Component calibration in the large (Fig 3)
 
 | component                        |   mean predicted |   mean observed |   ratio |
 |:---------------------------------|-----------------:|----------------:|--------:|
-| minutes                          |          83.0178 |         82.7028 |  0.9962 |
-| appearance points                |           1.9367 |          1.9294 |  0.9963 |
-| goals                            |           0.1154 |          0.1038 |  0.8998 |
-| assists                          |           0.1009 |          0.0971 |  0.9626 |
-| clean sheet (60+ min)            |           0.2702 |          0.2677 |  0.9909 |
-| bonus points                     |           0.2794 |          0.2756 |  0.9864 |
-| save points (GKP)                |           0.6501 |          0.5882 |  0.9047 |
-| yellow cards                     |           0.1382 |          0.1452 |  1.0508 |
-| defensive contribution (P of +2) |           0.1729 |          0.1854 |  1.0725 |
+| minutes                          |          83.036  |         82.7028 |  0.996  |
+| appearance points                |           1.9373 |          1.9294 |  0.9959 |
+| goals                            |           0.111  |          0.1038 |  0.9357 |
+| assists                          |           0.0993 |          0.0971 |  0.9785 |
+| clean sheet (60+ min)            |           0.2716 |          0.2677 |  0.9856 |
+| bonus points                     |           0.2789 |          0.2756 |  0.9883 |
+| save points (GKP)                |           0.649  |          0.5882 |  0.9063 |
+| yellow cards                     |           0.1525 |          0.1452 |  0.9525 |
+| defensive contribution (P of +2) |           0.1726 |          0.1854 |  1.0741 |
 
 ## Uncertainty diagnostics (Fig 4)
 
 | quantity                                       |   value |
 |:-----------------------------------------------|--------:|
-| PIT mean (0.5 ideal)                           |  0.4916 |
-| PIT sd (0.289 ideal)                           |  0.2908 |
-| share PIT in central 50%                       |  0.4962 |
-| share PIT in central 80%                       |  0.7947 |
-| [q25,q75] covers actual (incl. ties)           |  0.6538 |
-| [q10,q90] covers actual (incl. ties)           |  0.8737 |
-| season totals sd(z) aleatoric only             |  1.0493 |
-| season totals sd(z) +epistemic independent     |  1.0447 |
-| season totals sd(z) +epistemic correlated      |  0.9898 |
-| season totals 80% coverage (correlated)        |  0.8171 |
-| season totals 95% coverage (correlated)        |  0.944  |
+| PIT mean (0.5 ideal)                           |  0.4958 |
+| PIT sd (0.289 ideal)                           |  0.2907 |
+| share PIT in central 50%                       |  0.4965 |
+| share PIT in central 80%                       |  0.7931 |
+| [q25,q75] covers actual (incl. ties)           |  0.6502 |
+| [q10,q90] covers actual (incl. ties)           |  0.8714 |
+| season totals sd(z) aleatoric only             |  1.0591 |
+| season totals sd(z) +epistemic independent     |  1.0546 |
+| season totals sd(z) +epistemic correlated      |  0.9998 |
+| season totals 80% coverage (correlated)        |  0.8112 |
+| season totals 95% coverage (correlated)        |  0.9499 |
 | median epistemic share of variance (row level) |  0.0063 |
 
 Epistemic uncertainty by amount of Understat history (should fall with experience):
 
 | L540_time     |    n |   mean_xp |   mean_sd_epistemic |   mean_epistemic_share |
 |:--------------|-----:|----------:|--------------------:|-----------------------:|
-| <5 full games |  307 |    3.2993 |              0.3205 |                 0.0158 |
-| 5-15          |  738 |    3.2951 |              0.2389 |                 0.0104 |
-| 15-30         | 1684 |    3.4875 |              0.2314 |                 0.0095 |
-| 30+           | 5631 |    3.8461 |              0.2178 |                 0.0079 |
+| <5 full games |  307 |    3.2462 |              0.2832 |                 0.0141 |
+| 5-15          |  738 |    3.2484 |              0.242  |                 0.0109 |
+| 15-30         | 1684 |    3.4582 |              0.2193 |                 0.0088 |
+| 30+           | 5631 |    3.8106 |              0.2142 |                 0.0079 |
 
 ## Benchmark validity
 
@@ -84,7 +81,7 @@ The archived FPL xP ranks THIS match far better than this model but falls to the
 
 | season   | model                     |   RMSE |   Spearman |   Spearman next match |
 |:---------|:--------------------------|-------:|-----------:|----------------------:|
-| 2025-26  | this model                | 3.0854 |     0.2008 |                0.1168 |
+| 2025-26  | this model                | 3.0841 |     0.2029 |                0.118  |
 | 2025-26  | FPL xP                    | 4.3092 |     0.5138 |                0.1793 |
 | 2025-26  | form (last 5)             | 3.5726 |     0.0793 |                0.1518 |
 | 2025-26  | points per start (last 5) | 3.4091 |     0.0783 |                0.1083 |
@@ -93,15 +90,15 @@ The archived FPL xP ranks THIS match far better than this model but falls to the
 
 |   top-k by xP per gameweek |   rows |   mean xP |   mean actual |   actual/xP |   CI low |   CI high |   P(5+) predicted |   P(5+) observed |
 |---------------------------:|-------:|----------:|--------------:|------------:|---------:|----------:|------------------:|-----------------:|
-|                          5 |    190 |     6.539 |         5.847 |       0.894 |    5.369 |     6.345 |             0.565 |            0.532 |
-|                         10 |    380 |     5.995 |         5.268 |       0.879 |    4.92  |     5.663 |             0.526 |            0.474 |
-|                         20 |    760 |     5.495 |         4.929 |       0.897 |    4.588 |     5.201 |             0.487 |            0.437 |
-|                         40 |   1520 |     5.014 |         4.626 |       0.923 |    4.378 |     4.836 |             0.447 |            0.412 |
+|                          5 |    190 |     6.182 |         5.674 |       0.918 |    5.17  |     6.165 |             0.534 |            0.505 |
+|                         10 |    380 |     5.765 |         5.389 |       0.935 |    4.989 |     5.786 |             0.506 |            0.497 |
+|                         20 |    760 |     5.347 |         4.958 |       0.927 |    4.676 |     5.256 |             0.473 |            0.441 |
+|                         40 |   1520 |     4.932 |         4.615 |       0.936 |    4.399 |     4.807 |             0.439 |            0.404 |
 
 | subset             |   rows |   mean xP |   mean actual |   actual/xP |   CI low |   CI high |
 |:-------------------|-------:|----------:|--------------:|------------:|---------:|----------:|
-| price >= £8.0m     |    364 |     5.686 |         5.03  |       0.885 |    4.661 |     5.532 |
-| xP >= 4            |   2527 |     4.678 |         4.501 |       0.962 |    4.34  |     4.667 |
-| all evaluated rows |   8360 |     3.705 |         3.625 |       0.978 |    3.566 |     3.686 |
+| price >= £8.0m     |    364 |     5.462 |         5.03  |       0.921 |    4.628 |     5.438 |
+| xP >= 4            |   2480 |     4.637 |         4.516 |       0.974 |    4.315 |     4.686 |
+| all evaluated rows |   8360 |     3.669 |         3.625 |       0.988 |    3.568 |     3.684 |
 
-Rank correlation within each gameweek's top 50 by xP: 0.082
+Rank correlation within each gameweek's top 50 by xP: 0.088

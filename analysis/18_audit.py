@@ -134,8 +134,21 @@ def main():
     check("T1d team lambda reproduced by a replay truncated at the gameweek deadline", worst < 1e-9,
           f"10 fixtures, max |d lambda| = {worst:.2e}")
 
-    # ---- T2 single-feature leak scan
+    # ---- T1e league yellow rate (cards feature): brute-force recompute from rows kicked off before the deadline
     X13 = load_mod("x13", ROOT / "analysis/13_xp_model.py")
+    d13 = X13.load("2024-25")
+    dls = pd.Series(d13.deadline.unique()).sample(25, random_state=SEED)
+    dls = dls[dls > d13.kickoff_time.min() + pd.Timedelta(days=200)]   # skip the backfilled first 2016-17 weeks
+    worst = 0.0
+    for dl in dls:
+        w = d13[(d13.kickoff_time < dl) & (d13.kickoff_time >= dl - pd.Timedelta(days=365))]
+        brute = 90 * w.yellow_cards.sum() / w.minutes.sum()
+        stored = np.exp(d13.loc[d13.deadline == dl, "log_lg_yel"]).iloc[0]
+        worst = max(worst, abs(stored / brute - 1))
+    check("T1e league yellow rate recomputed from rows kicked off before the deadline", worst < 1e-9,
+          f"{len(dls)} deadlines, max relative error {worst:.1e}")
+
+    # ---- T2 single-feature leak scan
     MIN_FEATS = X13.MIN_FEATS + X13.START_FEATS
     t = dev.copy()
     t["home"] = t.was_home.astype(float)
@@ -169,6 +182,8 @@ def main():
           'load("2025-26" if sealed else "2026-27" if live else "2024-25")' in code13 and "tr, te = d[d.season < ts]" in code13
           and "assert tr.season.max() < ts" in code13 and "int(ts[:4]) - 1" in code13,
           "static check of 13_xp_model.py: load filter, fold split, EB estimated on seasons < test year")
+    check("T3 calibration of the goal / assist index fitted on earlier out-of-sample seasons only",
+          "pool = pool[pool.season < ts]" in code13, "static check of 13_xp_model.py: calibration pool filter")
 
     # ---- T4 integrity
     check("T4 master key (season, element, fixture) unique", not master.duplicated(["season", "element", "fixture"]).any(), f"{len(master):,} rows")
