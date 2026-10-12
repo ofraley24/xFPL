@@ -55,7 +55,7 @@ RULES = {"goal": {"GKP": 6, "DEF": 6, "MID": 5, "FWD": 4}, "cs": {"GKP": 4, "DEF
 MIN_FEATS = ["m1", "m3", "m5", "m10", "f_play5", "f_long5", "f_full5", "ewm3", "absent_streak", "fix_since_app",
              "days_since_app", "std_mpf", "prev_season_mpf", "career_apps", "n_prior_rows", "price_rank",
              "price_gap_top", "own_share_team", "m5_rank_pos", "n_active_pos", "value", "selected_log", "home",
-             "rest_days", "opp_rest_days", "next_gap_days", "fix_in_event", "supremacy", "total_goals", "p_win",
+             "rest_days", "opp_rest_days", "next_gap_days", "fix_in_event", "supremacy", "total_goals",
              "season_progress", "L540_log", "L180_log", "us_days_log", "five_subs", "bcd",
              "pos_GKP", "pos_DEF", "pos_MID", "pos_FWD"]
 
@@ -250,7 +250,11 @@ def fit_dc(tr):
 
 
 # ------------------------------------------------------------------ minutes ensemble
-def fit_minutes(tr, rng):
+START_FEATS = ["st_n10", "st_full5", "st_mean5", "st_since"]
+
+
+def fit_minutes(tr, rng, feats=None):
+    feats = feats or MIN_FEATS
     members = []
     fx = (tr.season + "_" + tr.fixture.astype(str)).to_numpy()
     uniq = np.unique(fx)
@@ -261,15 +265,16 @@ def fit_minutes(tr, rng):
         sub = tr.iloc[rows]
         m = HistGradientBoostingClassifier(max_iter=200, learning_rate=0.06, max_depth=5, min_samples_leaf=100,
                                            l2_regularization=1.0, random_state=SEED + b)
-        m.fit(sub[MIN_FEATS], sub.bucket)
+        m.fit(sub[feats], sub.bucket)
         members.append(m)
     return members
 
 
-def predict_minutes(members, te):
+def predict_minutes(members, te, feats=None):
+    feats = feats or MIN_FEATS
     P = np.zeros((B_MIN, len(te), K))
     for b, m in enumerate(members):
-        P[b][:, m.classes_] = m.predict_proba(te[MIN_FEATS])
+        P[b][:, m.classes_] = m.predict_proba(te[feats])
     return P
 
 
@@ -373,6 +378,8 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
         bonus = np.where(played, bonus, 0)
         # ---- points under the season's rules
         gpts = np.vectorize(RULES["goal"].get)(pdf)[:, None, None]
+        if season >= "2026-27":   # rule change published by the API: goalkeeper goal = 10
+            gpts = np.where((pdf == "GKP")[:, None, None], 10, gpts)
         cspts = np.vectorize(RULES["cs"].get)(pdf)[:, None, None]
         gcp = np.vectorize(RULES["gc_per2"].get)(pdf)[:, None, None]
         app = played.astype(int) + m60
@@ -413,12 +420,14 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
 def main():
     import sys
     sealed = "--sealed" in sys.argv
-    folds = ["2025-26"] if sealed else TEST
-    tag = "sealed" if sealed else "dev"
-    rng = np.random.default_rng(SEED + (1 if sealed else 0))
-    d = load("2025-26" if sealed else "2024-25")
-    if sealed:
-        print("SEALED RUN: one fold, test 2025-26, trained on 2016-17..2024-25", flush=True)
+    live = "--live" in sys.argv
+    cond_start = "--unconditional" not in sys.argv   # default: xP GIVEN THE PLAYER STARTS
+    mode = "sealed" if sealed else "live" if live else "dev"
+    folds = ["2025-26"] if sealed else ["2026-27"] if live else TEST
+    tag = mode + ("" if cond_start else "_uncond")
+    rng = np.random.default_rng(SEED + (1 if sealed else 2 if live else 0) + (10 if cond_start else 0))
+    d = load("2025-26" if sealed else "2026-27" if live else "2024-25")
+    print(f"RUN {tag}: folds {folds}; conditional on starting: {cond_start}", flush=True)
     print(f"rows {len(d):,}; universe share {d.universe.mean():.3f}", flush=True)
     a_chk = d[d.minutes >= 60]
     print("clean_sheets == (60+ and 0 conceded):",
@@ -426,7 +435,10 @@ def main():
     H = EB.split_half_table(EB.player_seasons())
     results, coefs = [], []
     for ts in folds:
-        tr, te = d[d.season < ts], d[(d.season == ts) & d.universe]
+        if cond_start:
+            tr, te = d[d.season < ts], d[(d.season == ts) & (d.started == 1)]
+        else:
+            tr, te = d[d.season < ts], d[(d.season == ts) & d.universe]
         assert tr.season.max() < ts
         pri = priors(tr)
         kmap = estimate_k_full(H, int(ts[:4]) - 1)
@@ -447,9 +459,14 @@ def main():
         pa, pg = app.tgt_pen_att.sum(), app.tgt_pen_goals.sum()
         conv_ab = (pg + 1, pa - pg + 1)
         s_team = team_sigma(tr)
-        utr = tr[tr.universe]
-        members = fit_minutes(utr, rng)
-        Pmin = predict_minutes(members, te)
+        if cond_start:   # minutes GIVEN a start: trained on starts only, zero minutes impossible
+            utr = tr[tr.started == 1]
+            mfeats = MIN_FEATS + START_FEATS
+        else:
+            utr = tr[tr.universe]
+            mfeats = MIN_FEATS
+        members = fit_minutes(utr, rng, mfeats)
+        Pmin = predict_minutes(members, te, mfeats)
         bucket_vals = {k: utr.minutes[utr.bucket == k].to_numpy(float) for k in range(1, K)}
         dc = None
         if ts >= "2025-26":

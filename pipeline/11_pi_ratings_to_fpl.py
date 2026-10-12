@@ -1,27 +1,21 @@
 #!/usr/bin/env python3
 """Attach dual (attack / defence) pi-ratings to FPL fixtures.
 
-1. Replay model_v1's PiRatingDixonColesModel over matches_unified.csv (all six leagues,
-   chronological) with a FIXED parameter file, recording for every match the PRE-match
-   state: attack and defence rating of both teams, league intercept, lambda / mu, plus
-   staleness (matches previously seen, days since the team's last match).
-2. Assert the replay reproduces walk_forward_predictions.csv (lambda, mu) to 1e-9, i.e. the
-   ratings really are the ones behind the model's published predictions.
+1. Replay model_v1's PiRatingModel over matches_unified.csv (all six leagues, chronological) with a
+   FIXED parameter file, recording for every match the PRE-match state: attack and defence rating of
+   both teams, league intercept, lambda / mu, plus staleness (matches previously seen, days since the
+   team's last match). Optional online terms: closed-doors home advantage, scoring-level drift and
+   home-advantage drift (see replay).
+2. Assert, with all options off, that the replay reproduces walk_forward_predictions.csv (lambda, mu)
+   to 1e-9, i.e. the ratings really are the ones behind the model's published predictions.
 3. Snapshot the ratings after the last played match (`pi_ratings_current.csv`).
-4. Build `fpl_team_fixture_ratings.csv`: ONE ROW PER TEAM PER FPL FIXTURE (2 rows per
-   fixture), including fixtures not yet played. Played fixtures use the pre-match ratings
-   of that match; upcoming fixtures use the current snapshot (`is_prediction = True`).
+4. Build `fpl_team_fixture_ratings.csv`: ONE ROW PER TEAM PER FPL FIXTURE (2 rows per fixture),
+   including fixtures not yet played. Played fixtures are rated from the snapshot taken at their
+   gameweek DEADLINE; upcoming fixtures from the current state (`is_prediction = True`).
    Join to player rows on (season, fixture, was_home).
 
 Row content for team T vs opponent O: own/opp attack and defence rating, expected goals for
-(lambda_T) and against (lambda_O) from the Dixon-Coles model, P(clean sheet), the
-distribution of goals conceded (0,1,2,3,4,5+), win/draw/loss probabilities.
-
-PARAMETER PROVENANCE. `--params` selects the hyperparameter file; its label is stored in
-every output row. The default is the full-sample fit, which has seen all matches including
-those it is later used to describe, a mild look-ahead on 8-11 scalar hyperparameters (not on
-team ratings, which are strictly walk-forward). For leak-free use on a given test period, pass
-the train-only file from the Stage 4 harness (stage4_v1_train_params.json) and re-run.
+(lambda_T) and against (lambda_O), staleness counters, parameter label.
 """
 import argparse
 import json
@@ -30,14 +24,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from config import DATA, DOCS, ROOT  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "model_v1"))
-from pi_rating_model import PiRatingDixonColesModel  # noqa: E402
+from pi_rating_model import PiRatingModel  # noqa: E402
 
 SRC = DATA / "interim" / "merged" / "model_v1"
 OUT = DATA / "ratings"
@@ -45,7 +38,7 @@ CW = DATA / "crosswalk"
 FPL = DATA / "fpl"
 
 
-def replay(matches, params, rho, bcd=False, bcd_prior_n=50.0, drift_lr=0.0, ha_lr=0.0, snap_times=None):
+def replay(matches, params, bcd=False, bcd_prior_n=50.0, drift_lr=0.0, ha_lr=0.0, snap_times=None):
     """Walk-forward replay. Options (all off by default -> identical to model_v1):
     bcd      home advantage in behind-closed-doors matches is estimated ONLINE from closed-doors matches
              already played (all leagues pooled), shrunk towards the current crowd value with a prior worth
@@ -66,10 +59,10 @@ def replay(matches, params, rho, bcd=False, bcd_prior_n=50.0, drift_lr=0.0, ha_l
     from collections import defaultdict
     from config import BCD_PERIODS, in_periods
     leagues = sorted(matches.league.unique())
-    model = PiRatingDixonColesModel(
+    model = PiRatingModel(
         home_adv=params["home_adv"], scale=params["scale"], alpha=params["alpha"],
         lr_attack=params["lr_attack"], lr_defence=params["lr_defence"],
-        league_intercepts={lg: params[f"c_{lg}"] for lg in leagues}, rho=rho)
+        league_intercepts={lg: params[f"c_{lg}"] for lg in leagues})
     h0 = params["home_adv"]
     tcol = matches["t"] if "t" in matches.columns else matches["date"]
     times = pd.to_datetime(tcol).to_numpy()
@@ -168,28 +161,11 @@ def lambdas_from_snapshot(snap, home, away, closed_doors):
     return lam, mu, ah, dh, aa, da
 
 
-def score_probs(lam, mu, rho, max_goals=10):
-    """Dixon-Coles score matrix -> (win, draw, loss for home), P(away=k), P(home=k)."""
-    xs = np.arange(max_goals + 1)
-    mat = np.outer(poisson.pmf(xs, lam), poisson.pmf(xs, mu))
-    mat[0, 0] *= 1 - lam * mu * rho
-    mat[0, 1] *= 1 + lam * rho
-    mat[1, 0] *= 1 + mu * rho
-    mat[1, 1] *= 1 - rho
-    mat /= mat.sum()
-    ph, pd_, pa = np.tril(mat, -1).sum(), np.trace(mat), np.triu(mat, 1).sum()
-    conc_home = mat.sum(axis=0)  # distribution of away goals = goals conceded by home
-    conc_away = mat.sum(axis=1)  # distribution of home goals = goals conceded by away
-    return (ph, pd_, pa), conc_home, conc_away
-
-
-def tidy(side, d, rho, label):
+def tidy(d, label):
     """Two rows (home, away) per fixture from one wide fixture row."""
     rows = []
     for r in d.itertuples(index=False):
-        (ph, px, pa), conc_h, conc_a = score_probs(r.lam, r.mu, rho)
         for home in (True, False):
-            conc = conc_h if home else conc_a
             rows.append({
                 "season": r.season, "fixture": r.fixture, "event": r.event, "kickoff_time": r.kickoff,
                 "was_home": home, "fpl_team_id": r.home_id if home else r.away_id,
@@ -201,10 +177,7 @@ def tidy(side, d, rho, label):
                 "team_gap_days": r.home_gap_days if home else r.away_gap_days,
                 "opp_gap_days": r.away_gap_days if home else r.home_gap_days,
                 "xg_for_pi": r.lam if home else r.mu, "xg_against_pi": r.mu if home else r.lam,
-                "p_win": ph if home else pa, "p_draw": px, "p_loss": pa if home else ph,
-                "p_clean_sheet": conc[0], "p_conc_0": conc[0], "p_conc_1": conc[1], "p_conc_2": conc[2],
-                "p_conc_3": conc[3], "p_conc_4": conc[4], "p_conc_5plus": conc[5:].sum(),
-                "is_prediction": r.is_prediction, "rho": rho, "params_label": label})
+                "is_prediction": r.is_prediction, "params_label": label})
     return pd.DataFrame(rows)
 
 
@@ -250,12 +223,11 @@ def main():
     out_dir = Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     params = json.load(open(a.params))
-    rho = params.get("rho", -0.13)
     matches = load_matches_with_clock()
     deadlines, fx_round = gameweek_deadlines()
     snap_times = sorted(set(deadlines.dropna()))
 
-    model, hist = replay(matches, params, rho, bcd=a.bcd, bcd_prior_n=a.bcd_prior_n, drift_lr=a.drift_lr,
+    model, hist = replay(matches, params, bcd=a.bcd, bcd_prior_n=a.bcd_prior_n, drift_lr=a.drift_lr,
                          ha_lr=a.ha_lr, snap_times=snap_times)
     hist["params_label"] = a.label
     hist.to_csv(out_dir / "pi_ratings_match.csv", index=False)
@@ -324,18 +296,17 @@ def main():
     allfx = pd.concat([pl[["season", "fixture", "event", "kickoff", "home_id", "away_id", "home_att", "home_def",
                            "away_att", "away_def", "lam", "mu", "home_n_prev", "away_n_prev", "home_gap_days",
                            "away_gap_days", "is_prediction"]], pd.DataFrame(rows)], ignore_index=True)
-    out = tidy(None, allfx, rho, a.label)
+    out = tidy(allfx, a.label)
     out.to_csv(out_dir / "fpl_team_fixture_ratings.csv", index=False)
 
     # ---- QC summary
     s = out[out.was_home & ~out.is_prediction].groupby("season").agg(
-        fixtures=("fixture", "size"), xg_for_home=("xg_for_pi", "mean"), xg_against_home=("xg_against_pi", "mean"),
-        mean_p_cs=("p_clean_sheet", "mean"))
+        fixtures=("fixture", "size"), xg_for_home=("xg_for_pi", "mean"), xg_against_home=("xg_against_pi", "mean"))
     print(s.round(3).to_string())
     print(f"\nupcoming fixtures rated: {int(out.is_prediction.sum() / 2)} of {len(up)} unplayed FPL fixtures")
     qc_name = "PI_RATINGS_QC.md" if out_dir == OUT else f"PI_RATINGS_QC_{a.label}.md"
     with open(DOCS / qc_name, "w") as f:
-        f.write(f"# Pi-rating attachment QC\n\nparams: `{a.label}` (`{Path(a.params).name}`), rho={rho:.4f}\n\n"
+        f.write(f"# Pi-rating attachment QC\n\nparams: `{a.label}` (`{Path(a.params).name}`)\n\n"
                 f"- replay reproduces walk_forward_predictions: max |d lambda| = {d:.2e} over {len(j):,} matches\n"
                 f"- rated FPL team-fixtures: {len(out):,}; of which predictions for upcoming fixtures: {int(out.is_prediction.sum())}\n\n"
                 + s.round(3).to_markdown() + "\n")

@@ -159,7 +159,7 @@ def main():
     opp = rt[["season", "fixture", "was_home", "rest_days"]].copy()
     opp["was_home"] = ~opp.was_home
     rt = rt.merge(opp.rename(columns={"rest_days": "opp_rest_days"}), on=["season", "fixture", "was_home"], how="left")
-    keep = ["season", "fixture", "was_home", "xg_for_pi", "xg_against_pi", "p_win", "p_draw", "p_loss",
+    keep = ["season", "fixture", "was_home", "xg_for_pi", "xg_against_pi",
             "rest_days", "opp_rest_days", "next_gap_days", "fix_in_event"]
     d = d.merge(rt[keep], on=["season", "fixture", "was_home"], how="left")
     d["supremacy"] = d.xg_for_pi - d.xg_against_pi

@@ -12,7 +12,7 @@ FEATURES, all strictly PRE-MATCH:
   attempts and goals, assists, and "team npxG while he was on the pitch". Sums, not rates, are
   stored so empirical-Bayes shrinkage can be applied later with the exposure visible.
   Also: appearances before this match, days since his previous appearance.
-  Team context: attack/defence pi-ratings and Dixon-Coles quantities for this fixture
+  Team context: attack/defence pi-ratings and expected goals for/against for this fixture
   (fpl_team_fixture_ratings.csv).
   Market proxies available at the deadline: FPL price (`value`) and ownership (`selected`).
 
@@ -143,7 +143,7 @@ def main():
     rt = pd.read_csv(DATA / "ratings" / "fpl_team_fixture_ratings.csv")
     rt["was_home"] = rt.was_home.astype(str).eq("True")
     keep = ["season", "fixture", "was_home", "team_att", "team_def", "opp_att", "opp_def", "xg_for_pi",
-            "xg_against_pi", "p_clean_sheet", "team_n_prev", "opp_n_prev"]
+            "xg_against_pi", "team_n_prev", "opp_n_prev"]
     pm = pm.merge(rt[keep], on=["season", "fixture", "was_home"], how="left")
     pm["sealed"] = pm.season >= "2025-26"  # protocol: 2025-26 is the sealed holdout, 2026-27 is live
     pm = pm.drop(columns=["match_id", "player_id"])

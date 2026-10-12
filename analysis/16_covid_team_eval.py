@@ -29,10 +29,14 @@ def dev(y, mu):
     return 2 * (t - (y - mu))
 
 
-def rps_1x2(lam, mu, gh, ga, rho):
+def rps_1x2(lam, mu, gh, ga, max_goals=10):
+    """Ranked probability score of home/draw/away from independent Poisson goals."""
+    xs = np.arange(max_goals + 1)
     out = np.empty(len(lam))
     for i in range(len(lam)):
-        (ph, pd_, pa), _, _ = R11.score_probs(lam[i], mu[i], rho)
+        mat = np.outer(poisson.pmf(xs, lam[i]), poisson.pmf(xs, mu[i]))
+        mat /= mat.sum()
+        ph, pd_, pa = np.tril(mat, -1).sum(), np.trace(mat), np.triu(mat, 1).sum()
         o = 0 if gh[i] > ga[i] else 1 if gh[i] == ga[i] else 2
         cp, co = np.cumsum([ph, pd_, pa]), np.cumsum(np.eye(3)[o])
         out[i] = ((cp - co) ** 2).sum() / 2
@@ -41,20 +45,19 @@ def rps_1x2(lam, mu, gh, ga, rho):
 
 def main():
     params = json.load(open(ROOT / "data/interim/pre2019/fitted_params_pre2019.json"))
-    rho = params["rho"]
     m = pd.read_csv(ROOT / "data/interim/merged/model_v1/matches_unified.csv", parse_dates=["date"])
     m = m.sort_values(["date", "league", "home_team"], kind="mergesort").reset_index(drop=True)
     pre = m[m.date < CUT].reset_index(drop=True)
     # choose drift_lr on pre-2019 only (Poisson NLL of goals, walk-forward)
     nll = {}
     for lr in (0.0, 0.0005, 0.001, 0.002, 0.004, 0.008):
-        _, h = R11.replay(pre, params, rho, drift_lr=lr)
+        _, h = R11.replay(pre, params, drift_lr=lr)
         nll[lr] = -(poisson.logpmf(pre.home_goals, h.lam).sum() + poisson.logpmf(pre.away_goals, h.mu).sum())
     best_lr = min(nll, key=nll.get)
     print("pre-2019 NLL by drift_lr:", {k: round(v, 1) for k, v in nll.items()}, "-> chosen", best_lr)
     nll_h = {}
     for lr in (0.0, 0.0002, 0.0005, 0.001, 0.002, 0.004):
-        _, h = R11.replay(pre, params, rho, drift_lr=best_lr, ha_lr=lr)
+        _, h = R11.replay(pre, params, drift_lr=best_lr, ha_lr=lr)
         nll_h[lr] = -(poisson.logpmf(pre.home_goals, h.lam).sum() + poisson.logpmf(pre.away_goals, h.mu).sum())
     best_ha = min(nll_h, key=nll_h.get)
     print("pre-2019 NLL by ha_lr (with chosen drift):", {k: round(v, 1) for k, v in nll_h.items()}, "-> chosen", best_ha)
@@ -67,7 +70,7 @@ def main():
                 f"+ all three, ha_lr x4 ({best_ha*4})": dict(bcd=True, bcd_prior_n=50, drift_lr=best_lr, ha_lr=best_ha * 4)}
     res, hist = {}, {}
     for name, kw in variants.items():
-        _, h = R11.replay(m, params, rho, **kw)
+        _, h = R11.replay(m, params, **kw)
         h = h.merge(m[["league", "date", "home_team", "away_team", "home_goals", "away_goals"]],
                     on=["league", "date", "home_team", "away_team"])
         hist[name] = h[h.date >= CUT].reset_index(drop=True)
@@ -76,7 +79,7 @@ def main():
     rows = []
     for name, h in hist.items():
         d = dev(h.home_goals.to_numpy(float), h.lam.to_numpy()) + dev(h.away_goals.to_numpy(float), h.mu.to_numpy())
-        r = rps_1x2(h.lam.to_numpy(), h.mu.to_numpy(), h.home_goals.to_numpy(), h.away_goals.to_numpy(), rho)
+        r = rps_1x2(h.lam.to_numpy(), h.mu.to_numpy(), h.home_goals.to_numpy(), h.away_goals.to_numpy())
         h["d"], h["r"] = d, r
         hist[name] = h
     for scope, mask_fn in (("all leagues", lambda h: np.ones(len(h), bool)), ("EPL", lambda h: (h.league == "EPL").to_numpy())):

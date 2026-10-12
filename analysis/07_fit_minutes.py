@@ -38,7 +38,7 @@ FEATS = ["m1", "m3", "m5", "m10", "f_play5", "f_long5", "f_full5", "ewm3", "abse
          "days_since_app", "std_mpf", "prev_season_mpf", "career_apps", "n_prior_rows",
          "price_rank", "price_gap_top", "own_share_team", "m5_rank_pos", "n_active_pos", "value", "selected_log",
          "home", "rest_days", "opp_rest_days", "next_gap_days", "fix_in_event", "supremacy", "total_goals",
-         "p_win", "season_progress", "pos_GKP", "pos_DEF", "pos_MID", "pos_FWD"]
+         "season_progress", "pos_GKP", "pos_DEF", "pos_MID", "pos_FWD"]
 
 
 def prep(d):

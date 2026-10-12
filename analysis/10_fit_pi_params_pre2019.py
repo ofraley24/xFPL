@@ -3,8 +3,7 @@
 
 The first player-model test season is 2019-20, so ratings produced with these parameters carry
 no look-ahead at all into any test fold (team ratings themselves are always walk-forward).
-Same objective, bounds, starting values and optimiser budget as model_v1/fit_v1.py; rho is then
-fitted on the training-period walk-forward predictions (vectorised grid, same grid as the original).
+Same objective, bounds, starting values and optimiser budget as model_v1/fit_v1.py.
 """
 import json
 import sys
@@ -17,7 +16,7 @@ from scipy.optimize import minimize
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "model_v1"))
-from pi_rating_model import PiRatingDixonColesModel, walk_forward_nll  # noqa: E402
+from pi_rating_model import walk_forward_nll  # noqa: E402
 
 SRC = ROOT / "data" / "interim" / "merged" / "model_v1" / "matches_unified.csv"
 OUT = ROOT / "data" / "interim" / "pre2019"
@@ -43,28 +42,6 @@ def main():
                    options={"maxfev": 250, "xatol": 1e-3, "fatol": 5.0, "adaptive": True})
     params = dict(zip(order, map(float, res.x)))
     print(f"fit done in {time.time()-t0:.0f}s, nfev={res.nfev}, NLL={res.fun:.1f}", flush=True)
-    # rho on training-period walk-forward lambdas (pre-update), vectorised
-    m = PiRatingDixonColesModel(home_adv=params["home_adv"], scale=params["scale"], alpha=params["alpha"],
-                                lr_attack=params["lr_attack"], lr_defence=params["lr_defence"],
-                                league_intercepts={lg: params[f"c_{lg}"] for lg in leagues})
-    lam, mu = np.empty(len(tr)), np.empty(len(tr))
-    for i, r in enumerate(tr.itertuples(index=False)):
-        lam[i], mu[i] = m.update(r.league, r.home_team, r.away_team, r.home_goals, r.away_goals,
-                                 r.home_npxG, r.away_npxG)
-    gh, ga = tr.home_goals.to_numpy(), tr.away_goals.to_numpy()
-    best, best_ll = None, -np.inf
-    for rho in np.linspace(-0.30, 0.10, 81):
-        t = np.ones(len(tr))
-        t[(gh == 0) & (ga == 0)] = (1 - lam * mu * rho)[(gh == 0) & (ga == 0)]
-        t[(gh == 0) & (ga == 1)] = (1 + lam * rho)[(gh == 0) & (ga == 1)]
-        t[(gh == 1) & (ga == 0)] = (1 + mu * rho)[(gh == 1) & (ga == 0)]
-        t[(gh == 1) & (ga == 1)] = 1 - rho
-        if (t <= 0).any():
-            continue
-        ll = np.log(t).sum()
-        if ll > best_ll:
-            best, best_ll = rho, ll
-    params["rho"] = float(best)
     params["_meta"] = {"train_cutoff": str(CUTOFF.date()), "n_train_matches": int(len(tr)),
                        "optimiser": "Nelder-Mead maxfev=250 (as fit_v1.py)", "nll": float(res.fun)}
     json.dump(params, open(OUT / "fitted_params_pre2019.json", "w"), indent=2)

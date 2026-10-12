@@ -40,7 +40,7 @@ def main():
         best = None
         for dl in DRIFT:
             for ha in HA:
-                _, h = R11.replay(hist_d, params, params["rho"], bcd=True, bcd_prior_n=50, drift_lr=dl, ha_lr=ha)
+                _, h = R11.replay(hist_d, params, bcd=True, bcd_prior_n=50, drift_lr=dl, ha_lr=ha)
                 nll = -(poisson.logpmf(hist_d.home_goals[score], h.lam[score]).sum()
                         + poisson.logpmf(hist_d.away_goals[score], h.mu[score]).sum())
                 if best is None or nll < best[0]:

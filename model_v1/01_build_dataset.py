@@ -1,5 +1,5 @@
 """
-Stage 0 (data prep) for the dual pi-rating -> Dixon-Coles Poisson model, v1.
+Stage 0 (data prep) for the dual attack/defence pi-rating model.
 
 Builds one unified, match-level dataset across all Understat leagues:
 date, league, season, home_team, away_team, home_goals, away_goals,

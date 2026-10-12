@@ -60,7 +60,6 @@ def features(df, pr, m0=M0):
     F["log_lama"] = np.log(df.xg_against_pi)
     F["log_price"] = np.log(df.value.clip(lower=35))
     F["log_sel"] = np.log1p(df.selected)
-    F["log_cs"] = np.log(df.p_clean_sheet)
     d0 = m0 / 90 * 1.2
     for hl in (180, 540):
         t = df[f"L{hl}_time"]

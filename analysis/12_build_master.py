@@ -146,6 +146,59 @@ def fpl_lags(d):
     return d
 
 
+def start_labels(d):
+    """started = the player was in the starting XI (Understat position != 'Sub' for this match).
+    Understat has a row for every appearance; FPL's own `starts` (2022-23 on) is used only to validate."""
+    cw = pd.read_csv(DATA / "crosswalk" / "player_match_crosswalk.csv",
+                     usecols=["season", "fixture", "element", "us_match_id", "us_player_id"])
+    pos = pd.read_csv(DATA / "understat_clean" / "EPL_player_match_stats.csv", usecols=["match_id", "player_id", "position"])
+    pos = pos.drop_duplicates(["match_id", "player_id"]).rename(columns={"match_id": "us_match_id", "player_id": "us_player_id",
+                                                                         "position": "us_position"})
+    x = d[["season", "fixture", "element"]].merge(cw, on=["season", "fixture", "element"], how="left") \
+        .merge(pos, on=["us_match_id", "us_player_id"], how="left")
+    started = np.where(x.us_position.notna(), x.us_position.ne("Sub"), d.minutes.to_numpy() >= 60)
+    d["started"] = ((d.minutes.to_numpy() > 0) & started).astype(int)
+    d["start_label_src"] = np.where(x.us_position.notna(), "understat", np.where(d.minutes > 0, "minutes>=60 fallback", "did not play"))
+    return d
+
+
+def start_history(d):
+    """Per player, strictly before the gameweek deadline: starts in the last 10 fixtures, share of the last 5
+    starts completed (90 min), mean minutes of the last 5 starts, fixtures since the last start.
+    Second fixture of a double gameweek copies the first's values (the first is after the deadline)."""
+    d = d.sort_values(["code", "kickoff_time", "fixture"]).copy()
+    code, st, m = d.code.to_numpy(), d.started.to_numpy(), d.minutes.to_numpy(float)
+    ss, rr = d.season.to_numpy(), d["round"].to_numpy()
+    n = len(d)
+    out = {k: np.full(n, np.nan) for k in ("st_n10", "st_full5", "st_mean5", "st_since")}
+    i = 0
+    while i < n:
+        j = i
+        while j < n and code[j] == code[i]:
+            j += 1
+        starts_min = []
+        last_start = -1
+        for k in range(i, j):
+            if k > i and ss[k] == ss[k - 1] and rr[k] == rr[k - 1]:
+                for c in out:
+                    out[c][k] = out[c][k - 1]
+            else:
+                lo = max(i, k - 10)
+                out["st_n10"][k] = st[lo:k].sum()
+                if starts_min:
+                    last5 = np.array(starts_min[-5:])
+                    out["st_full5"][k] = (last5 >= 90).mean()
+                    out["st_mean5"][k] = last5.mean()
+                out["st_since"][k] = (k - last_start) if last_start >= 0 else np.nan
+            if st[k]:
+                starts_min.append(m[k])
+                last_start = k
+        i = j
+    for c, v in out.items():
+        d[c] = v
+    return d
+
+
 def main():
     md = pd.read_parquet(OUT / "minutes_dataset.parquet")
     md = md.drop(columns=[c for c in ("L180_time", "L540_time") if c in md.columns])
@@ -165,8 +218,7 @@ def main():
     # team ratings (evaluation set) replace whatever the minutes table carried
     rt = pd.read_csv(RATINGS / "fpl_team_fixture_ratings.csv")
     rt["was_home"] = rt.was_home.astype(str).eq("True")
-    rcols = ["team_att", "team_def", "opp_att", "opp_def", "xg_for_pi", "xg_against_pi", "p_win", "p_draw", "p_loss",
-             "p_clean_sheet", "params_label"]
+    rcols = ["team_att", "team_def", "opp_att", "opp_def", "xg_for_pi", "xg_against_pi", "params_label"]
     d = d.drop(columns=[c for c in rcols + ["supremacy", "total_goals"] if c in d.columns])
     d = d.merge(rt[["season", "fixture", "was_home"] + rcols], on=["season", "fixture", "was_home"], how="left")
     d["supremacy"] = d.xg_for_pi - d.xg_against_pi
@@ -175,6 +227,10 @@ def main():
     tg = pd.read_parquet(OUT / "scorer_assist_dataset.parquet",
                          columns=["season", "fixture", "element", "tgt_np_goals", "tgt_pen_goals", "tgt_pen_att"])
     d = d.merge(tg, on=["season", "fixture", "element"], how="left")
+    d = start_history(start_labels(d))
+    v = d[(d.season >= "2022-23") & (d.minutes > 0) & d.starts.notna()]
+    print(f"start label vs FPL `starts` (2022-23 on, appearances): agreement {(v.started == v.starts).mean():.4f} "
+          f"on {len(v):,} rows; label source: {d.start_label_src.value_counts().to_dict()}")
     d["sealed"] = d.season >= "2025-26"
     d.to_parquet(OUT / "master.parquet", index=False)
     print(f"{len(d):,} rows, {d.shape[1]} cols; ratings: {d.params_label.dropna().unique()}")

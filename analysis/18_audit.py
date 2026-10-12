@@ -125,7 +125,7 @@ def main():
         dl, ha = (sel.loc[p.season, "drift_lr"], sel.loc[p.season, "ha_lr"])
         deadline = deadlines.loc[(p.season, fx_round.loc[(p.season, p.fixture)])]
         before = mt[mt.t < deadline].reset_index(drop=True)          # nothing at or after the deadline
-        model, _ = R11.replay(before, params, params["rho"], bcd=True, bcd_prior_n=50, drift_lr=dl, ha_lr=ha)
+        model, _ = R11.replay(before, params, bcd=True, bcd_prior_n=50, drift_lr=dl, ha_lr=ha)
         snap = R11.snapshot_state(model, model.shared_state, True, 50)
         closed = bool(in_periods(pd.Series([p.us_date]), BCD_PERIODS["EPL"])[0])
         lam = R11.lambdas_from_snapshot(snap, p.us_home, p.us_away, closed)[0]
@@ -135,14 +135,15 @@ def main():
           f"10 fixtures, max |d lambda| = {worst:.2e}")
 
     # ---- T2 single-feature leak scan
-    MIN_FEATS = load_mod("x13", ROOT / "analysis/13_xp_model.py").MIN_FEATS
+    X13 = load_mod("x13", ROOT / "analysis/13_xp_model.py")
+    MIN_FEATS = X13.MIN_FEATS + X13.START_FEATS
     t = dev.copy()
     t["home"] = t.was_home.astype(float)
     t["selected_log"] = np.log1p(t.selected)
     for c in ("L540_log", "L180_log", "us_days_log"):
         if c not in t:
             t[c] = 0.0
-    played = (t.minutes > 0).astype(int)
+    played = (t.minutes >= 90).astype(int)   # rows are starters: target = completes the match
     scored = (t.total_points >= 5).astype(int)
     aucs = []
     for f in MIN_FEATS:
@@ -150,7 +151,7 @@ def main():
             continue
         x = t[f].fillna(t[f].median())
         a1 = roc_auc_score(played, x); a2 = roc_auc_score(scored, x)
-        aucs.append({"feature": f, "AUC played": max(a1, 1 - a1), "AUC 5+ pts": max(a2, 1 - a2)})
+        aucs.append({"feature": f, "AUC played": max(a1, 1 - a1), "AUC 5+ pts": max(a2, 1 - a2)})   # 'played' = 90 min
     A = pd.DataFrame(aucs).sort_values("AUC played", ascending=False)
     check("T2 no single feature near-perfectly predicts the outcome (AUC < 0.95)", (A[["AUC played", "AUC 5+ pts"]] < 0.95).all().all(),
           f"max AUC played {A['AUC played'].max():.3f} ({A.iloc[0].feature})")
@@ -165,7 +166,7 @@ def main():
           "; ".join(f"{s}: d={r.drift_lr}, h={r.ha_lr}" for s, r in sel.iterrows()))
     code13 = (ROOT / "analysis/13_xp_model.py").read_text()
     check("T3 xP model reads only seasons <= 2024-25 and fits each fold on earlier seasons",
-          'load("2025-26" if sealed else "2024-25")' in code13 and "tr, te = d[d.season < ts]" in code13
+          'load("2025-26" if sealed else "2026-27" if live else "2024-25")' in code13 and "tr, te = d[d.season < ts]" in code13
           and "assert tr.season.max() < ts" in code13 and "int(ts[:4]) - 1" in code13,
           "static check of 13_xp_model.py: load filter, fold split, EB estimated on seasons < test year")
 
