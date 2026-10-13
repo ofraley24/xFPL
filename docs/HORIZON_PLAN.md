@@ -1,4 +1,8 @@
-# Horizon backtest: pre-registration (DRAFT, rule to be confirmed before any horizon prediction is scored)
+# Horizon backtest: pre-registration
+
+Status: rule FIXED 2026-10-13, thresholds confirmed by the owner, committed before any horizon prediction
+was scored. Predictions (`24_predict_horizons.py`, `data/analysis/xp_horizon.parquet`) were generated but not
+compared with outcomes before this commit.
 
 Question: how much worse is xP (given the player starts) when it is predicted h = 1..8 gameweeks ahead,
 with every feature and the team ratings frozen at the earlier deadline? The answer sets the default and
@@ -36,10 +40,15 @@ present at every h. Also reported on all rows.
   (sum of epistemic sds)^2; sd(z), 80% and 95% coverage; also with aleatoric-only and independent epistemic
 - decomposition (descriptive): h = 8 rows with only player features frozen, or only ratings frozen
 
-## Decision rule (PROPOSED, confirm or change before the dev run is scored)
+## Decision rule (FIXED)
 On the dev seasons (2019-20..2024-25), balanced panel:
 1. Horizon h is SUPPORTED if |bias_h| <= 0.10 points per row and the 80% interval of windows of length
    L = h covers between 0.77 and 0.83 of outcomes.
+   - bias_h = mean(actual - xP) over the balanced panel's rows at horizon h, dev seasons pooled.
+   - windows of length L: every (season, deadline t, player) with at least one started fixture in gameweeks
+     t..t+L-1, each fixture predicted from deadline t, for every t with t + L - 1 <= the season's last
+     gameweek (complete windows only); dev seasons pooled. 80% interval: |z| <= 1.2816 with
+     z = (sum actual - sum xP) / sqrt(sum var_aleatoric + (sum sd_epistemic)^2).
 2. The site's default range is the largest h such that every horizon 1..h is supported. Longer ranges stay
    available with a warning.
 3. If the window intervals fail but bias passes, the site shows sums without intervals beyond the supported
