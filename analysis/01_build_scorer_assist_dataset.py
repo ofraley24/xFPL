@@ -93,9 +93,14 @@ def main():
     s["pen"] = s.situation == "Penalty"
     s["goal"] = s.result == "Goal"
     s["npxg"] = np.where(s.pen, 0.0, s.xG)
-    pl = s.groupby(["match_id", "player_id"]).apply(lambda g: pd.Series({
-        "np_shots": (~g.pen).sum(), "npxg": g.npxg.sum(), "np_goals": (g.goal & ~g.pen).sum(),
-        "pen_att": g.pen.sum(), "pen_goals": (g.goal & g.pen).sum()})).reset_index()
+    # per player-match sums: counts vectorised; npxg with Series.sum per group, which adds in the same order
+    # as the earlier per-group apply (bit-identical; the vectorised groupby sum differs in the last digit)
+    s["np_shot"], s["np_goal"], s["pen_goal"] = ~s.pen, s.goal & ~s.pen, s.goal & s.pen
+    gb = s.groupby(["match_id", "player_id"])
+    pl = gb.agg(np_shots=("np_shot", "sum"), np_goals=("np_goal", "sum"), pen_att=("pen", "sum"),
+                pen_goals=("pen_goal", "sum")).astype(float)
+    pl.insert(1, "npxg", gb.npxg.apply(lambda x: x.sum()))
+    pl = pl.reset_index()
     team = s.groupby(["match_id", "h_a"]).agg(team_npxg=("npxg", "sum"),
                                               team_shots=("pen", lambda x: (~x).sum()),
                                               team_pen=("pen", "sum")).reset_index()

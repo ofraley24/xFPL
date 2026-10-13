@@ -1,4 +1,4 @@
-# FPL <-> Understat crosswalk QC (2026-10-13)
+# FPL <-> Understat crosswalk QC (2026-10-14)
 
 ## Fixtures (FPL fixture -> Understat match)
 

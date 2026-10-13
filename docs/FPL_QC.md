@@ -1,4 +1,4 @@
-# FPL data QC (2026-10-13)
+# FPL data QC (2026-10-14)
 
 51/51 checks passed.
 

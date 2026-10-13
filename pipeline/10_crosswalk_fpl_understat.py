@@ -19,6 +19,11 @@ or non-playing squad members. Their xG/xA are therefore missing, not zero.
 
 Outputs (data/crosswalk/): fixture_crosswalk.csv, team_crosswalk.csv,
 player_crosswalk.csv (persistent), player_match_crosswalk.csv, and docs/CROSSWALK_QC.md.
+
+--incremental (weekly refresh): fixtures and teams are matched in full (seconds); player pairs already in
+player_match_crosswalk.csv are kept for fixtures whose Understat match is unchanged, and only the other
+fixtures are assigned, in one pass pinned to the existing persistent map. The full two-pass run remains the
+reference (and re-derives every pair).
 """
 import re
 import sys
@@ -265,10 +270,12 @@ def main():
     pmp["was_home"] = pmp.was_home.astype(str).eq("True")
     pmp = pmp.merge(fxw[["season", "fixture", "us_match_id"]], on=["season", "fixture"], how="inner")
 
-    def run_pass(pinned):
+    def run_pass(pinned, skip=frozenset()):
         recs = []
         usg = {k: g for k, g in usp.groupby(["match_id", "h_a"])}
         for (s, fx, side), fp in pmp.groupby(["season", "fixture", "was_home"]):
+            if (s, fx) in skip:
+                continue
             fp = fp.reset_index(drop=True)
             mid = fp.us_match_id.iloc[0]
             ur = usg.get((mid, "h" if side else "a"))
@@ -294,6 +301,18 @@ def main():
     if "--report-only" in sys.argv:  # reuse saved matching, only rebuild the QC report
         p2 = pd.read_csv(OUT / "player_match_crosswalk.csv")
         cons2 = consolidate(p2)
+    elif "--incremental" in sys.argv:
+        old = pd.read_csv(OUT / "player_match_crosswalk.csv")
+        cur = set(zip(fxw.season, fxw.fixture, fxw.us_match_id))
+        old = old[[k in cur for k in zip(old.season, old.fixture, old.us_match_id)]]
+        prev = pd.read_csv(OUT / "player_crosswalk.csv")
+        pinned = dict(zip(prev.code, prev.us_player_id))
+        new = run_pass(pinned, skip=frozenset(zip(old.season, old.fixture)))
+        print(f"incremental: kept {len(old):,} pairs, assigned {len(new):,} new pairs "
+              f"in {new[['season', 'fixture']].drop_duplicates().shape[0] if len(new) else 0} fixtures")
+        p2 = pd.concat([old, new], ignore_index=True)   # new fixtures are the latest: same order as a full run
+        cons2 = consolidate(p2)
+        p2.to_csv(OUT / "player_match_crosswalk.csv", index=False)
     else:
         p1 = run_pass(None)
         cons1 = consolidate(p1)

@@ -37,7 +37,7 @@ os.environ.setdefault("XFPL_RATINGS", str(DATA / "ratings_eval"))
 RATINGS = Path(os.environ["XFPL_RATINGS"])
 FORECASTS = DATA / "forecasts"
 POS = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-SCHEMA = 1
+SCHEMA = 2
 
 
 def load_mod(name, path):
@@ -215,10 +215,12 @@ def main():
     print(f"simulating {len(S):,} rows in {S.sim_fixture.nunique():,} match copies ...", flush=True)
     te = S.drop(columns=["fixture"]).rename(columns={"sim_fixture": "fixture"})
     seed = X13.SEED + int(deadline.timestamp()) % 1_000_000
-    res, _, _ = X13.predict_rows(M, te, np.random.default_rng(seed))
+    res, _, _ = X13.predict_rows(M, te, np.random.default_rng(seed), want_pmf=True)
     S = pd.concat([S, res], axis=1)
     out = S[S.focal].set_index("row").sort_index()
     out = d.join(out[[c for c in res.columns] + ["in_xi"]])
+    assert np.allclose(np.stack(out.pmf).sum(1), 1) and np.allclose(
+        np.stack(out.pmf) @ np.arange(X13.PMF_LO, X13.PMF_HI + 1), out.xp, atol=0.02), "pmf inconsistent with xP"
     gate("G6 one prediction per player-fixture", out.xp.notna().all() and len(out) == len(d), f"{len(out):,} rows")
     gate("G6 xP finite and within [0, 25]", bool(np.isfinite(out.xp).all() and out.xp.between(0, 25).all()),
          f"range {out.xp.min():.2f}-{out.xp.max():.2f}")
@@ -249,6 +251,29 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
             "e_yellow", "e_red", "e_og", "e_pen_miss", "e_pen_saved", "e_minutes", "e_dc", "value", "xg_for_pi",
             "xg_against_pi"]
     out[keep].to_parquet(FORECASTS / f"{stem}.parquet", index=False)
+
+    def pmf_json(v):
+        """Compact distribution: probabilities from the lowest to the highest score with p >= 0.0005."""
+        v = np.asarray(v, float)
+        nz = np.flatnonzero(v >= 0.0005)
+        lo, hi = nz.min(), nz.max()
+        p = np.round(v[lo:hi + 1], 4)
+        p[np.argmax(p)] += round(1 - p.sum(), 4)   # keep the total at 1 after rounding and trimming
+        return {"lo": int(lo + X13.PMF_LO), "p": [float(x) for x in p]}
+
+    # team fixtures with expected goals (from the deadline ratings), one row per fixture
+    tf = out.drop_duplicates(["fixture", "was_home"]).set_index(["fixture", "was_home"])
+    fixtures_json = []
+    for f in sorted((x for x in fixtures if not x["finished"] and x["event"] in rounds), key=lambda x: (x["event"], x["kickoff_time"])):
+        h, a = tf.loc[(f["id"], True)] if (f["id"], True) in tf.index else None, tf.loc[(f["id"], False)] if (f["id"], False) in tf.index else None
+        src = h if h is not None else a
+        if src is None:
+            continue
+        xg_home = float(h.xg_for_pi) if h is not None else float(a.xg_against_pi)
+        xg_away = float(h.xg_against_pi) if h is not None else float(a.xg_for_pi)
+        fixtures_json.append({"id": f["id"], "gw": f["event"], "home": f["team_h"], "away": f["team_a"],
+                              "kickoff": pd.Timestamp(f["kickoff_time"]).strftime("%Y-%m-%dT%H:%MZ"),
+                              "xg_home": round(xg_home, 3), "xg_away": round(xg_away, 3)})
     r3 = lambda x: None if pd.isna(x) else round(float(x), 3)
     players = []
     for pid, g in out.sort_values("kickoff_time").groupby("element"):
@@ -256,6 +281,7 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
         players.append({
             "id": int(pid), "code": int(e.code), "name": e.web_name, "full_name": f"{e.first_name} {e.second_name}",
             "team": int(e.team), "pos": POS[int(e.element_type)], "price": e.now_cost / 10,
+            "own": float(e.selected_by_percent),
             "status": e.status, "chance_next": None if pd.isna(e.chance_of_playing_next_round) else int(e.chance_of_playing_next_round),
             "news": e.news or "",
             "fixtures": [{"gw": int(r["round"]), "h": int(r.horizon), "fixture": int(r.fixture), "opp": int(r.opp_id),
@@ -263,7 +289,8 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
                           "xi": bool(r.in_xi), "xp": r3(r.xp), "q10": r3(r.q10), "q50": r3(r.q50), "q90": r3(r.q90),
                           "p5": r3(r.p_ge5), "p10": r3(r.p_ge10), "var_ale": r3(r.var_ale), "sd_epi": r3(np.sqrt(max(r.var_epi, 0))),
                           "parts": {k: r3(r[f"e_{k}"]) for k in ("app", "goals", "assists", "cs", "gc_pts", "saves_pts",
-                                                               "bonus", "dc", "yellow", "red", "og", "pen_miss", "pen_saved")}}
+                                                               "bonus", "dc", "yellow", "red", "og", "pen_miss", "pen_saved")},
+                          "pmf": pmf_json(r.pmf)}
                          for _, r in g.iterrows()]})
     doc = {"schema_version": SCHEMA, "target": "expected FPL points GIVEN THAT THE PLAYER STARTS",
            "season": season, "deadline_gw": t, "deadline_utc": deadline.strftime("%Y-%m-%dT%H:%MZ"),
@@ -273,6 +300,7 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
            "intervals": "not validated for sums over gameweeks (docs/HORIZON_RESULTS.md); per-fixture quantiles only",
            "gates": [{"name": n, "pass": p, "detail": dt} for n, p, dt in gates],
            "teams": [{"id": tm["id"], "name": tm["name"], "short": tm["short_name"]} for tm in teams.values()],
+           "fixtures": fixtures_json,
            "players": players}
     (FORECASTS / f"{stem}.json").write_text(json.dumps(doc, separators=(",", ":")))
     print(f"wrote {FORECASTS / stem}.json and .parquet ({len(players)} players, {len(out):,} player-fixtures)")

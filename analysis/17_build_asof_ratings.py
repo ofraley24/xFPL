@@ -10,7 +10,9 @@ settings, so every rating is one that could have been computed at the time.
 Output: data/ratings_eval/fpl_team_fixture_ratings.csv (+ selection table in docs/).
 Options: --reuse-selection (take the drift settings from docs/ratings_asof_selection.csv instead of re-running
 the search), --horizon N (also fpl_team_fixture_ratings_asof.csv: played fixtures rated as of the deadlines
-1..N gameweeks earlier, for the horizon backtest).
+1..N gameweeks earlier, for the horizon backtest), --current-only (weekly refresh: replay only the current
+season's setting and replace that season's rows in the existing files; earlier seasons are rated from
+their own deadline snapshots and cannot change).
 """
 import importlib.util
 import json
@@ -40,7 +42,7 @@ def main():
         sel = {int(r.season[:4]): (r.drift_lr, r.ha_lr) for r in prev.itertuples()}
     else:
         sel = select_drift(params)
-    build(sel, horizon)
+    build(sel, horizon, current_only="--current-only" in sys.argv)
 
 
 def select_drift(params):
@@ -65,9 +67,12 @@ def select_drift(params):
     return sel
 
 
-def build(sel, horizon=0):
+def build(sel, horizon=0, current_only=False):
     # seasons <= 2018-19: pre-2019 choice (drift chosen pre-2019 in 16_covid_team_eval.py = 0.002, ha = 0)
-    combos = {(0.002, 0.0)} | set(sel.values())
+    key = lambda s: (0.002, 0.0) if int(s[:4]) < 2019 else sel[min(int(s[:4]), 2025)]
+    dst = ROOT / "data" / "ratings_eval"
+    cur_season = pd.read_csv(ROOT / "data" / "fpl" / "fpl_events.csv").season.iloc[0]
+    combos = {key(cur_season)} if current_only else {(0.002, 0.0)} | set(sel.values())
     outs = {}
     for dl, ha in combos:
         tag = f"d{dl}_h{ha}"
@@ -79,10 +84,19 @@ def build(sel, horizon=0):
         outs[(dl, ha)] = pd.read_csv(out / "fpl_team_fixture_ratings.csv")
         if horizon:
             outs[(dl, ha, "asof")] = pd.read_csv(out / "fpl_team_fixture_ratings_asof.csv")
-    dst = ROOT / "data" / "ratings_eval"
     dst.mkdir(exist_ok=True)
+    if current_only:
+        k = key(cur_season)
+        for name, o in (("fpl_team_fixture_ratings.csv", outs[k]),
+                        ("fpl_team_fixture_ratings_asof.csv", outs.get(k + ("asof",)))):
+            if o is None:
+                continue
+            old = pd.read_csv(dst / name)
+            pd.concat([old[old.season != cur_season], o[o.season == cur_season]], ignore_index=True).to_csv(
+                dst / name, index=False)
+        print(f"current season {cur_season} replaced with setting d{k[0]}_h{k[1]}")
+        return
     seasons = sorted(outs[(0.002, 0.0)].season.unique())
-    key = lambda s: (0.002, 0.0) if int(s[:4]) < 2019 else sel[min(int(s[:4]), 2025)]
     allr = pd.concat([outs[key(s)][outs[key(s)].season == s] for s in seasons], ignore_index=True)
     allr.to_csv(dst / "fpl_team_fixture_ratings.csv", index=False)
     if horizon:

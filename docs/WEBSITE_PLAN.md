@@ -122,7 +122,16 @@ Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PL
 - After each gameweek, score the archived forecast against actual points (started players), adding to a
   running prospective record.
 
-### WP4. Refresh automation
+### WP4. Refresh automation. INCREMENTAL REFRESH DONE 2026-10-14
+- `pipeline/weekly_refresh.py`: one command from new results to a gated forecast (log per run in `data/logs/`).
+  Step times before -> after (each new path checked identical to the full rebuild on 2026-10-14):
+  scorer dataset 31 min -> 1.5 min (vectorised; npxg sums kept bit-identical), crosswalk 14 min -> 80 s
+  (`--incremental`: only new fixtures, pinned to the persistent map), ratings 2 min -> 20 s (`17 --current-only`),
+  minutes features 79 s -> 31 s (vectorised count). Whole chain ~57 min -> ~12-13 min uncontended, of which the
+  forecast is ~5-6 min. `--full` runs the reference rebuild.
+- Further speed-ups, not done: the forecast rebuilds 06/12 itself (could write master instead of the separate step),
+  the bench-player match copies simulate 22 rows to get 1, and 02/02b/05 rebuild all six leagues' Understat files.
+- Not yet scheduled: running weekly_refresh.py automatically before each deadline (needs the owner's OK).
 - Done: FPL snapshot twice a day (see Decisions), logs in `data/logs/fpl_snapshot.log`.
 - Make the weekly refresh INCREMENTAL (today it rebuilds everything, ~15 min + ~5 min forecast): the model
   is never refitted mid-season, and features only depend on earlier rows, so append the new gameweek's rows
@@ -134,7 +143,12 @@ Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PL
   snapshot's `events`) snapshot → features → predict → QC → export. A run missed while the Mac sleeps
   fires on wake. If it fires after the deadline, it must not publish (decision time is the deadline).
 
-### WP5. The site (`xfpl-web`)
+### WP5. The site (`xfpl-web`). FIRST VERSION 2026-10-14
+Built locally in `~/Projects/xfpl-web` (own git repository, not on GitHub yet: needs the owner's OK). Reads the
+forecast JSON (schema 2: adds ownership, team fixtures with expected goals, and every player-fixture's points
+distribution `pmf`). Tabs: Planner, Fixtures, My squad (best XI + captain weekly, transfer finder by squad effect),
+Dream team (integer program in the browser), Captaincy (haul / blank chances, captain duel), Haul map, Simulator,
+Compare, About. See its README. Original v1 list below for reference.
 - **Stack:** Vite + React + TypeScript, a table library (TanStack Table) and a small chart library. Static
   build, run locally for now (no hosting needed while it is personal). Forecast files are gitignored in the
   web repo.

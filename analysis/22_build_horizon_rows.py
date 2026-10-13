@@ -74,7 +74,7 @@ def squad_features(d):
     team = ["asof_round", "season", "fixture", "was_home"]
     d["own_share_team"] = d.selected / d.groupby(team).selected.transform("sum").clip(lower=1)
     d["m5_rank_pos"] = d.groupby(grp).m5.rank(ascending=False, method="min")
-    d["n_active_pos"] = d.groupby(grp).f_play5.transform(lambda x: (x > 0).sum())
+    d["n_active_pos"] = d.f_play5.gt(0).groupby([d[c] for c in grp]).transform("sum").astype("int64")
     return d
 
 

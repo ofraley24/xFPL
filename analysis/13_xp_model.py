@@ -507,8 +507,11 @@ def rate_matrix(fit, Xrow, betas, eb_noise, lam_noise):
     return np.clip(eta, -20, 3), b_lm
 
 
+PMF_LO, PMF_HI = -6, 40   # points range of the optional per-row distribution (values outside are clipped)
+
+
 def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team, season, rng, dc=None,
-                  slope=None, ehat=None):
+                  slope=None, ehat=None, want_pmf=False):
     # whole fixtures per chunk (bonus is allocated within the match; team noise is shared within it)
     orig_index = te.index
     order = np.argsort(te.fixture.to_numpy(), kind="stable")
@@ -528,6 +531,7 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
     comp = {k: np.zeros(n) for k in ("e_app", "e_goals", "e_assists", "e_cs", "e_gc_pts", "e_saves_pts", "e_bonus",
                                       "e_yellow", "e_red", "e_og", "e_pen_miss", "e_pen_saved", "e_minutes", "p_play",
                                       "p60", "e_dc", "p_g1", "p_g2")}
+    pmf = np.zeros((n, PMF_HI - PMF_LO + 1), dtype=np.float32) if want_pmf else None
     dc_on = dc is not None and season >= "2025-26"   # defensive-contribution points exist from 2025-26
     Xall = pd.concat([te, F], axis=1)
     Xall = Xall.loc[:, ~Xall.columns.duplicated()]
@@ -632,6 +636,11 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
         pts = (app + gpts * goals + 3 * assists + cspts * cs + gcp * (conc // 2) + saves // 3 + 5 * pensv
                - 2 * pen_miss - yel - 3 * red - 2 * og + bonus + 2 * dc_hit)
         flat = pts.reshape(nn, -1)
+        if want_pmf:   # counting only: the random stream is unchanged
+            b = np.clip(flat, PMF_LO, PMF_HI) - PMF_LO
+            cnt = np.zeros((nn, PMF_HI - PMF_LO + 1))
+            np.add.at(cnt, (np.repeat(np.arange(nn), flat.shape[1]), b.ravel()), 1)
+            pmf[sl] = cnt / flat.shape[1]
         out["xp"][sl] = flat.mean(1)
         out["var_total"][sl] = flat.var(1)
         mj = pts.mean(2)
@@ -649,7 +658,10 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
                          ("e_pen_saved", pensv), ("e_minutes", mins), ("p_play", played), ("p60", m60),
                          ("e_dc", dc_hit), ("p_g1", goals >= 1), ("p_g2", goals >= 2)):
             comp[key][sl] = arr.reshape(nn, -1).mean(1)
-    return pd.DataFrame({**out, **comp}, index=te.index).loc[orig_index]
+    res = pd.DataFrame({**out, **comp}, index=te.index)
+    if want_pmf:
+        res["pmf"] = list(pmf)
+    return res.loc[orig_index]
 
 
 # ------------------------------------------------------------------ fit / predict
@@ -717,7 +729,7 @@ def fit_season(tr, ts, cond_start, H, pool=None, cal_kind="spline", fit_minutes_
             "coefs": pd.concat(coefs), "n_train": len(tr), "train_hash": frame_hash(tr)}
 
 
-def predict_rows(M, te, rng, Pmin=None):
+def predict_rows(M, te, rng, Pmin=None, want_pmf=False):
     """Simulate xP for rows `te` (master-table schema; outcomes optional) with the fitted season model M.
     Pmin: minutes-bucket probabilities (B_MIN, n, K) if already computed. Returns (results, features, Pmin)."""
     Fte_eb, Ste = eb_features(te, M["kmap"])
@@ -740,7 +752,7 @@ def predict_rows(M, te, rng, Pmin=None):
         print(f"  {M['season']}: {M['cal_kind']} calibration from {M['cal']['n_pool']:,} earlier out-of-sample rows; "
               f"mean factor goals {fx_['goal_open']:.3f}, assists {fx_['assist']:.3f}", flush=True)
     res = simulate_fold(te, Fte, Ste, M["fits"], M["bonus_fit"], Pmin, bv, M["conv_ab"], M["s_team"], M["season"],
-                        rng, dc=dc, slope=slope, ehat=ehat)
+                        rng, dc=dc, slope=slope, ehat=ehat, want_pmf=want_pmf)
     res["ehat_goal_open"], res["ehat_assist"] = ehat["goal_open"], ehat["assist"]
     res["minutes_ens_sd_pplay"] = (1 - Pmin[:, :, 0]).std(0)
     return res, Fte, Pmin

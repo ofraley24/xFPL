@@ -183,7 +183,7 @@ def build(pm):
     team = ["season", "fixture", "was_home"]
     d["own_share_team"] = d.selected / d.groupby(team).selected.transform("sum").clip(lower=1)
     d["m5_rank_pos"] = d.groupby(grp).m5.rank(ascending=False, method="min")
-    d["n_active_pos"] = d.groupby(grp).f_play5.transform(lambda x: (x > 0).sum())
+    d["n_active_pos"] = d.f_play5.gt(0).groupby([d[c] for c in grp]).transform("sum").astype("int64")
 
     # (Understat history is attached as-of kickoff in 12_build_master.py; joining the appearance-only
     #  scorer table here leaked whether the player appeared.)
