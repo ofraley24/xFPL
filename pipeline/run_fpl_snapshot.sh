@@ -3,7 +3,7 @@
 # Morning run: full snapshot (bootstrap, fixtures, every player's element summary, ~5 min).
 # Evening run: bootstrap + fixtures only (injury flags / news after press conferences).
 set -u
-ROOT="/Users/oscarfraley/Documents/Betting model data"
+ROOT="/Users/oscarfraley/Projects/xFPL"
 LOG="$ROOT/data/logs"
 mkdir -p "$LOG"
 cd "$ROOT" || exit 1
