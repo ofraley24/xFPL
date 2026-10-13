@@ -200,7 +200,17 @@ def start_history(d):
 
 
 def main():
-    md = pd.read_parquet(OUT / "minutes_dataset.parquet")
+    d = build(pd.read_parquet(OUT / "minutes_dataset.parquet"))
+    d.to_parquet(OUT / "master.parquet", index=False)
+    print(f"{len(d):,} rows, {d.shape[1]} cols; ratings: {d.params_label.dropna().unique()}")
+    print("rows without ratings:", int(d.xg_for_pi.isna().sum()), "| rows with Understat id:",
+          f"{d.us_player_id.notna().mean():.3f}", "| appearance rows with Understat id:",
+          f"{d.us_player_id[d.minutes > 0].notna().mean():.4f}")
+
+
+def build(md, us_states=None):
+    """Master rows from the minutes dataset `md` (06.build). Unplayed placeholder rows get NaN outcomes.
+    us_states: Understat post-match states (understat_post_states()), computed if not given."""
     md = md.drop(columns=[c for c in ("L180_time", "L540_time") if c in md.columns])
     pm = pd.read_csv(DATA / "fpl" / "fpl_player_match.csv", low_memory=False,
                      usecols=["season", "element", "fixture", "kickoff_time", "position"] + OUTCOMES)
@@ -213,7 +223,7 @@ def main():
     d = d.reset_index(drop=True)
     d["row_id"] = np.arange(len(d))
     print("Understat as-of features ...", flush=True)
-    U = asof_understat(d, understat_post_states())
+    U = asof_understat(d, understat_post_states() if us_states is None else us_states)
     d = d.merge(U, on="row_id", how="left")
     # team ratings (evaluation set) replace whatever the minutes table carried
     rt = pd.read_csv(RATINGS / "fpl_team_fixture_ratings.csv")
@@ -232,11 +242,7 @@ def main():
     print(f"start label vs FPL `starts` (2022-23 on, appearances): agreement {(v.started == v.starts).mean():.4f} "
           f"on {len(v):,} rows; label source: {d.start_label_src.value_counts().to_dict()}")
     d["sealed"] = d.season >= "2025-26"
-    d.to_parquet(OUT / "master.parquet", index=False)
-    print(f"{len(d):,} rows, {d.shape[1]} cols; ratings: {d.params_label.dropna().unique()}")
-    print("rows without ratings:", int(d.xg_for_pi.isna().sum()), "| rows with Understat id:",
-          f"{d.us_player_id.notna().mean():.3f}", "| appearance rows with Understat id:",
-          f"{d.us_player_id[d.minutes > 0].notna().mean():.4f}")
+    return d
 
 
 if __name__ == "__main__":

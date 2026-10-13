@@ -54,6 +54,8 @@ comparison) -> `analysis/18` (audit).
 | `22_build_horizon_rows.py` | horizon rows: player-fixtures 1-8 gameweeks ahead with features and ratings frozen at the earlier deadline; h = 1 reproduces the master table |
 | `23_audit_horizon.py` | truncation test of the horizon rows (`docs/AUDIT_HORIZON.md`) |
 | `24_predict_horizons.py` | predicts the horizon rows with the saved fold models (`data/models/`) |
+| `25_score_horizons.py` | scores the horizon backtest against the pre-registered rule (`docs/HORIZON_RESULTS*.md`) |
+| `26_forecast.py` | live forecast: xP given a start for every registered player's fixtures in the next 8 gameweeks, features frozen at the next deadline; QC gates; writes `data/forecasts/forecast_<season>_gw<t>_<snapshot>.json` for the website |
 
 Decision time is the gameweek deadline. No feature uses information recorded after it.
 

@@ -659,8 +659,10 @@ MODELS = ROOT / "data" / "models"
 
 
 def frame_hash(df):
-    """Content hash of a data frame (values and column names, not the index)."""
+    """Content hash of a data frame (values and column names, not the index). `row_id` (a running number that
+    shifts when rows are added anywhere) is left out."""
     import hashlib
+    df = df.drop(columns=["row_id"], errors="ignore")
     h = hashlib.sha256(pd.util.hash_pandas_object(df, index=False).to_numpy().tobytes())
     h.update("|".join(map(str, df.columns)).encode())
     return h.hexdigest()[:16]

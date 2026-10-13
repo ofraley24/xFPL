@@ -78,11 +78,14 @@ def squad_features(d):
     return d
 
 
-def season_rows(m, rt, ra, season, H, us_states):
-    """Horizon rows of one season. m: master rows of the season with team id; rt: fixture schedule."""
+def season_rows(m, rt, ra, season, H, us_states, rounds=None):
+    """Horizon rows of one season. m: master rows of the season with team id; rt: fixture schedule;
+    rounds: the deadlines (gameweeks) to predict from (default every gameweek in m)."""
     m = m.sort_values(["code", "kickoff_time", "fixture"]).reset_index(drop=True)
     m["mrow"] = np.arange(len(m))
     deadlines = m.groupby("round").deadline.first()
+    if rounds is not None:
+        deadlines = deadlines[deadlines.index.isin(rounds)]
     team_rounds = rt.groupby("fpl_team_id").event.apply(lambda x: np.sort(x.unique())).to_dict()
     dcols = decay_cols(m.columns)
     pieces = []

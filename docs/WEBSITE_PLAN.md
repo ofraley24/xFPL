@@ -89,7 +89,23 @@ Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PL
 - **Order:** dev seasons 2019-20..2024-25 first; rule fixed; then sealed 2025-26 once.
 - **Cost:** about 8 times the rows of the current evaluation, all in the simulation step.
 
-### WP3. Forecast mode and export (research repo)
+### WP3. Forecast mode and export (research repo). FIRST FORECAST 2026-10-13
+- Built: `analysis/26_forecast.py`. Placeholder rows for every registered player x unplayed fixture in the
+  next 8 gameweeks go through 06.build / 12.build with the finished rows (06 and 12 now expose `build`;
+  master rebuilt identical), the anchor at the next deadline feeds 22's horizon construction, and the saved
+  live model predicts. Bonus is ranked within a probable XI per team; every other player is simulated in
+  his own copy of the match. Gates and JSON export as below. Dry run on 2026-10-13: end to end in ~5 min,
+  4,496 player-fixtures for GW7-14, probable starters' mean xP 3.63; the data-current gates failed as they
+  should (GW6 not yet in the data), so a full data refresh is running.
+- First export after a full data refresh (GW6 complete): `data/forecasts/forecast_2026-27_gw07_20261013T192949Z.json`,
+  GW7-14, 562 players x 8 fixtures, 14/14 gates. The training-data gate first flagged a false alarm: the
+  hash included `row_id`, a running number that shifts when rows are added; it is now excluded and the
+  saved models' hashes were recomputed from the master they were fitted on (all 8 match the current data).
+- Visible consequence of the start-conditional target: backup goalkeepers (e.g. Arsenal's) rank at the top,
+  because xP assumes they start. The site must say so plainly; P(start) remains a later version.
+- Remaining: scoring archived forecasts after each gameweek (prospective record).
+- Known issue from the 2026-10-13 refresh: Understat Ligue 1 2026 shots sum to 153 goals vs 157 in the
+  results (recent matches; upstream lag). Not used for EPL players' current form; recheck next refresh.
 - `predict --forecast`: the current deadline's rows for every player x upcoming fixture within the
   horizon, simulated with the season's fitted model.
 - QC gates (nothing is published on failure): player and fixture counts against the snapshot, no missing
@@ -108,6 +124,12 @@ Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PL
 
 ### WP4. Refresh automation
 - Done: FPL snapshot twice a day (see Decisions), logs in `data/logs/fpl_snapshot.log`.
+- Make the weekly refresh INCREMENTAL (today it rebuilds everything, ~15 min + ~5 min forecast): the model
+  is never refitted mid-season, and features only depend on earlier rows, so append the new gameweek's rows
+  instead of recomputing 2016 onwards; save the ratings replay state and replay only new matches with the
+  current season's setting (17 replays every setting over all leagues since 2014); skip the forecast's
+  own full rebuild of features once the incremental path is trusted. Target: a few minutes. Keep the full
+  rebuild as a periodic check that the incremental result is identical.
 - Next: Understat refresh after each gameweek, then about 2 h before each deadline (read from the
   snapshot's `events`) snapshot → features → predict → QC → export. A run missed while the Mac sleeps
   fires on wake. If it fires after the deadline, it must not publish (decision time is the deadline).

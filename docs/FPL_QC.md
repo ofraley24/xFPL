@@ -1,4 +1,4 @@
-# FPL data QC (2026-10-11)
+# FPL data QC (2026-10-13)
 
 51/51 checks passed.
 
@@ -31,11 +31,11 @@
 | dc10_DEF   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |         2 |         2 |
 | dc10_FWD   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |        -0 |         1 |
 | dc10_MID   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |        -0 |         0 |
-| dc12_DEF   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |        -0 |         0 |
+| dc12_DEF   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |        -0 |        -0 |
 | dc12_FWD   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |         2 |         1 |
 | dc12_MID   |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |       nan |         2 |         2 |
 | gc2_DEF    |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |
-| gc2_FWD    |        -0 |         0 |        -0 |        -0 |         0 |        -0 |         0 |         0 |         0 |         0 |        -0 |
+| gc2_FWD    |        -0 |         0 |        -0 |        -0 |         0 |        -0 |         0 |         0 |         0 |         0 |         0 |
 | gc2_GKP    |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |        -1 |
 | gc2_MID    |        -0 |         0 |        -0 |         0 |         0 |         0 |        -0 |        -0 |         0 |        -0 |        -0 |
 | goal_DEF   |         6 |         6 |         6 |         6 |         6 |         6 |         6 |         6 |         6 |         6 |         6 |
@@ -73,15 +73,15 @@
 | F2 2025-26 defensive_contribution coverage | PASS | 100.0% |
 | F2 2026-27 expected_goals coverage (expected) | PASS | 100.0% |
 | F2 2026-27 defensive_contribution coverage | PASS | 100.0% |
-| F3 2026-27 summed match history == bootstrap season total (total_points) | PASS | 100.00% of 527 players match |
-| F3 2026-27 summed match history == bootstrap season total (minutes) | PASS | 100.00% of 527 players match |
-| F3 2026-27 summed match history == bootstrap season total (goals_scored) | PASS | 100.00% of 527 players match |
-| F3 2026-27 summed match history == bootstrap season total (assists) | PASS | 100.00% of 527 players match |
-| F4 live API vs vaastav GW1 agree (minutes) | PASS | 100.00% of 485 |
-| F4 live API vs vaastav GW1 agree (total_points) | PASS | 100.00% of 485 |
-| F4 live API vs vaastav GW1 agree (goals_scored) | PASS | 100.00% of 485 |
-| F4 live API vs vaastav GW1 agree (bps) | PASS | 100.00% of 485 |
-| F4 live API vs vaastav GW1 agree (expected_goals) | PASS | 100.00% of 485 |
+| F3 2026-27 summed match history == bootstrap season total (total_points) | PASS | 100.00% of 667 players match |
+| F3 2026-27 summed match history == bootstrap season total (minutes) | PASS | 100.00% of 667 players match |
+| F3 2026-27 summed match history == bootstrap season total (goals_scored) | PASS | 100.00% of 667 players match |
+| F3 2026-27 summed match history == bootstrap season total (assists) | PASS | 100.00% of 667 players match |
+| F4 live API vs vaastav GW1 agree (minutes) | PASS | 100.00% of 610 |
+| F4 live API vs vaastav GW1 agree (total_points) | PASS | 100.00% of 610 |
+| F4 live API vs vaastav GW1 agree (goals_scored) | PASS | 100.00% of 610 |
+| F4 live API vs vaastav GW1 agree (bps) | PASS | 100.00% of 610 |
+| F4 live API vs vaastav GW1 agree (expected_goals) | PASS | 100.00% of 610 |
 | F5 2016-17 points identity: R2=1.0, exact=100.0% | PASS |  |
 | F5 2017-18 points identity: R2=1.0, exact=100.0% | PASS |  |
 | F5 2018-19 points identity: R2=1.0, exact=100.0% | PASS |  |

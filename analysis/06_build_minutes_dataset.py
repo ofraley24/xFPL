@@ -116,6 +116,16 @@ def main():
                      usecols=["season", "round", "element", "code", "position", "fixture", "was_home", "minutes",
                               "value", "selected", "kickoff_time", "fixture_finished"])
     pm = pm[pm.position.isin(["GKP", "DEF", "MID", "FWD"]) & pm.fixture_finished].copy()
+    d = build(pm)
+    d.to_parquet(OUT / "minutes_dataset.parquet", index=False)
+    print(f"{len(d):,} rows, {d.shape[1]} columns -> {OUT/'minutes_dataset.parquet'}")
+    print("share zero-minute rows:", round((d.minutes == 0).mean(), 3))
+    print("rows missing fixture context:", int(d.xg_for_pi.isna().sum()))
+
+
+def build(pm):
+    """Minutes features for player-match rows `pm` (fpl_player_match schema). Rows are features only of
+    rows before them, so unplayed placeholder rows (minutes NaN) may be appended for forecasting."""
     pm["was_home"] = pm.was_home.astype(str).eq("True")
     pm["kickoff_time"] = pd.to_datetime(pm.kickoff_time, utc=True).dt.tz_localize(None)
     # a postponed fixture appears twice (zero-minute row in the original gameweek, real row in the
@@ -177,10 +187,7 @@ def main():
 
     # (Understat history is attached as-of kickoff in 12_build_master.py; joining the appearance-only
     #  scorer table here leaked whether the player appeared.)
-    d.to_parquet(OUT / "minutes_dataset.parquet", index=False)
-    print(f"{len(d):,} rows, {d.shape[1]} columns -> {OUT/'minutes_dataset.parquet'}")
-    print("share zero-minute rows:", round((d.minutes == 0).mean(), 3))
-    print("rows missing fixture context:", int(d.xg_for_pi.isna().sum()))
+    return d
 
 
 if __name__ == "__main__":
