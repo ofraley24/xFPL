@@ -56,8 +56,16 @@ Mac (launchd)                                         xfpl-web (static)
   Fixtures without a gameweek (postponed) are listed as unscheduled and not forecast.
 
 ### WP2. Horizon backtest (research repo, before the site uses horizons > 1)
-Pre-registration: `docs/HORIZON_PLAN.md` (rule awaiting confirmation). Predictions:
-`24_predict_horizons.py` (saved fold models; h = 1 reproduces the walk-forward predictions exactly).
+DONE 2026-10-13. Pre-registration: `docs/HORIZON_PLAN.md` (rule fixed and committed before scoring).
+Predictions: `24_predict_horizons.py` (h = 1 reproduces the walk-forward predictions exactly). Scoring:
+`25_score_horizons.py` -> `docs/HORIZON_RESULTS.md` (dev), `docs/HORIZON_RESULTS_sealed.md` (2025-26, once).
+**Outcome.** Point forecasts hold up to 8 gameweeks ahead: bias within ±0.04 at every h (dev and sealed), MAE
++0.1% and within-gameweek rank correlation 0.314 -> 0.300 (dev) from h = 1 to 8. The normal-approximation
+window interval FAILS the rule for L = 1..5 (80% coverage 0.87 -> 0.83, above 0.83: intervals too wide in the
+middle, and 95% coverage 0.94, slightly short) and passes for L = 6..8; sealed agrees. By the fixed rule no
+horizon is "supported" (it requires every L <= h), so rule 3 applies: the site shows range xP for the full
+8 gameweeks WITHOUT intervals, and intervals wait for joint draws (exact percentiles of the summed
+simulation). The scale is right (sd(z) 1.02-1.04), the normal shape is not, for sums of a few fixtures.
 Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PLAN.md`:
 - **Rows:** for each deadline t of each test season and each h = 1..8, every player who **started** a
   fixture in gameweek t + h, with player features and team ratings both as of deadline t. h = 1 is the
