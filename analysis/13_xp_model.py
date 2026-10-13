@@ -75,6 +75,12 @@ def load(max_season="2024-25"):
     """Development runs read seasons up to 2024-25 only; the sealed run (--sealed) also reads 2025-26."""
     d = pd.read_parquet(OUT / "master.parquet")
     d = d[(d.season >= "2016-17") & (d.season <= max_season)].reset_index(drop=True)
+    return prepare(d)
+
+
+def prepare(d, lg_yel=None):
+    """Model columns for rows with the master-table schema. lg_yel: log league yellow rate by deadline
+    (Series); by default computed from the rows themselves (which must then be the full history)."""
     d["bucket"] = np.digitize(d.minutes.to_numpy(), EDGES)
     d["home"] = d.was_home.astype(float)
     d["selected_log"] = np.log1p(d.selected)
@@ -93,7 +99,7 @@ def load(max_season="2024-25"):
                                                                               "team_a_score"]).drop_duplicates(["season", "fixture"])
     d = d.merge(pm, on=["season", "fixture"], how="left")
     d["team_goals"] = np.where(d.was_home, d.team_h_score, d.team_a_score)
-    d["log_lg_yel"] = league_yellow_rate(d)
+    d["log_lg_yel"] = league_yellow_rate(d) if lg_yel is None else d.deadline.map(lg_yel).to_numpy()
     return d
 
 
@@ -241,30 +247,49 @@ def expected_hat(fit, X, Pm, mbar):
     return e
 
 
-def fit_slope(pool, comp_col, target, idx_new, kind="linear"):
+def cal_design(li, kind):
+    """Calibration basis on the pool's log index `li`: (B, patsy design matrix or None)."""
+    if kind == "linear":
+        return sm.add_constant(li), None
+    lo, hi = li.min(), li.max()
+    kn = tuple(np.quantile(li, [0.5, 0.9, 0.98]))
+    D = dmatrix(f"cr(x, knots={kn}, lower_bound={lo}, upper_bound={hi})", {"x": li}, return_type="matrix")
+    return np.asarray(D), D
+
+
+def fit_calibration(pool, comp_col, target, kind="linear"):
     """Walk-forward calibration of a component's point-estimate index on earlier out-of-sample rows:
     log E[observed] = f(log index), f linear (a + b log index) or a natural cubic spline with knots at the
     50/90/98% quantiles of the pool's log index (linear beyond its range). Returns the coefficients, their
-    covariance and the basis evaluated at the new rows' index."""
+    covariance and what calibration_basis needs (the pool's log index rebuilds the spline basis exactly)."""
     p_ = pool[(pool[comp_col] > 0) & pool[target].notna()]
     li = np.log(p_[comp_col].to_numpy())
-    li_new = np.log(np.clip(idx_new, 1e-6, None))
-    if kind == "linear":
-        B, B_new = sm.add_constant(li), sm.add_constant(li_new, has_constant="add")
-    else:
-        lo, hi = li.min(), li.max()
-        kn = tuple(np.quantile(li, [0.5, 0.9, 0.98]))
-        D = dmatrix(f"cr(x, knots={kn}, lower_bound={lo}, upper_bound={hi})", {"x": li}, return_type="matrix")
-        B = np.asarray(D)
-        # beyond the pool's range: continue linearly in log index from the boundary (slope from the edge)
-        xc = np.clip(li_new, lo, hi)
-        B_new = np.asarray(build_design_matrices([D.design_info], {"x": xc})[0])
-        h = 1e-3 * (hi - lo)
-        at = lambda x: np.asarray(build_design_matrices([D.design_info], {"x": np.array([x])})[0])
-        d_lo, d_hi = (at(lo + h) - at(lo)) / h, (at(hi) - at(hi - h)) / h
-        B_new = B_new + np.minimum(li_new - lo, 0)[:, None] * d_lo + np.maximum(li_new - hi, 0)[:, None] * d_hi
+    B, _ = cal_design(li, kind)
     r = sm.GLM(p_[target].to_numpy(float), B, family=sm.families.Poisson()).fit()
-    return np.asarray(r.params), np.asarray(r.cov_params()), B_new
+    return {"kind": kind, "params": np.asarray(r.params), "cov": np.asarray(r.cov_params()), "li_pool": li}
+
+
+def calibration_basis(cal, idx_new):
+    """The calibration basis evaluated at new rows' point-estimate index."""
+    li_new = np.log(np.clip(idx_new, 1e-6, None))
+    if cal["kind"] == "linear":
+        return sm.add_constant(li_new, has_constant="add")
+    li = cal["li_pool"]
+    _, D = cal_design(li, cal["kind"])
+    lo, hi = li.min(), li.max()
+    # beyond the pool's range: continue linearly in log index from the boundary (slope from the edge)
+    xc = np.clip(li_new, lo, hi)
+    B_new = np.asarray(build_design_matrices([D.design_info], {"x": xc})[0])
+    h = 1e-3 * (hi - lo)
+    at = lambda x: np.asarray(build_design_matrices([D.design_info], {"x": np.array([x])})[0])
+    d_lo, d_hi = (at(lo + h) - at(lo)) / h, (at(hi) - at(hi - h)) / h
+    return B_new + np.minimum(li_new - lo, 0)[:, None] * d_lo + np.maximum(li_new - hi, 0)[:, None] * d_hi
+
+
+def fit_slope(pool, comp_col, target, idx_new, kind="linear"):
+    """fit_calibration + calibration_basis in one call: (coefficients, covariance, basis at the new rows)."""
+    cal = fit_calibration(pool, comp_col, target, kind)
+    return cal["params"], cal["cov"], calibration_basis(cal, idx_new)
 
 
 BONUS_X = ["g1", "g2p", "a1", "a2p", "cs_def", "cs_mid", "m60", "sv3", "conc2p", "pensv", "yel", "pos_DEF", "pos_MID",
@@ -498,7 +523,8 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
     pos = te.position.to_numpy()
     out = {k: np.zeros(n) for k in ("xp", "var_total", "var_epi", "q10", "q25", "q50", "q75", "q90", "p_ge2", "p_ge5",
                                      "p_ge10", "cdf_lo", "cdf_hi")}
-    y_act = te.total_points.to_numpy(float)   # used ONLY to read the predictive CDF at the outcome (for PIT)
+    # used ONLY to read the predictive CDF at the outcome (for PIT); forecast rows have no outcome
+    y_act = te.total_points.to_numpy(float) if "total_points" in te else np.full(n, np.nan)
     comp = {k: np.zeros(n) for k in ("e_app", "e_goals", "e_assists", "e_cs", "e_gc_pts", "e_saves_pts", "e_bonus",
                                       "e_yellow", "e_red", "e_og", "e_pen_miss", "e_pen_saved", "e_minutes", "p_play",
                                       "p60", "e_dc", "p_g1", "p_g2")}
@@ -626,6 +652,119 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
     return pd.DataFrame({**out, **comp}, index=te.index).loc[orig_index]
 
 
+# ------------------------------------------------------------------ fit / predict
+# A season's model is FITTED ONCE (every component is trained on earlier seasons only) and can then predict any
+# rows with the feature schema: the finished fixtures of the season (evaluation) or upcoming ones (forecast).
+MODELS = ROOT / "data" / "models"
+
+
+def frame_hash(df):
+    """Content hash of a data frame (values and column names, not the index)."""
+    import hashlib
+    h = hashlib.sha256(pd.util.hash_pandas_object(df, index=False).to_numpy().tobytes())
+    h.update("|".join(map(str, df.columns)).encode())
+    return h.hexdigest()[:16]
+
+
+def fit_season(tr, ts, cond_start, H, pool=None, cal_kind="spline", fit_minutes_model=True):
+    """Fit every component for test season `ts` on the training rows `tr` (seasons before ts).
+    pool: earlier out-of-sample predictions for the calibration of the goal / assist index (cal_kind 'spline',
+    'linear' or None for no calibration). Returns a picklable dict; predict_rows applies it."""
+    # common random numbers: every variant uses the same seed for the same fold
+    rng = np.random.default_rng(SEED + 7 * int(ts[:4]) + (10 if cond_start else 0))
+    assert tr.season.max() < ts
+    pri = priors(tr)
+    kmap = estimate_k_full(H, int(ts[:4]) - 1)
+    Ftr = pd.concat([fixed_features(tr, pri), eb_features(tr, kmap)[0]], axis=1)
+    trF = pd.concat([tr, Ftr], axis=1)
+    app = trF[trF.minutes > 0]
+    fits, coefs = {}, []
+    for name, spec in GLM_SPECS.items():
+        rows = app if spec["rows"] == "app" else app[app.position == "GKP"]
+        rows = rows[rows[spec["y"]].notna()]
+        fits[name] = fit_glm(rows, spec)
+        terms = fits[name]["names"]
+        coefs.append(pd.DataFrame({"fold": ts, "component": name, "term": terms,
+                                   "beta": fits[name]["beta"], "se": np.sqrt(np.diag(fits[name]["cov"]))}))
+    bonus_fit = fit_bonus(app, Ftr, cond_start, np.random.default_rng(SEED + int(ts[:4])))
+    coefs.append(pd.DataFrame({"fold": ts, "component": "bonus_rank", "term": BONUS_X, "beta": bonus_fit["beta"],
+                               "se": np.sqrt(np.diag(bonus_fit["cov"]))}))
+    pa, pg = app.tgt_pen_att.sum(), app.tgt_pen_goals.sum()
+    if cond_start:   # minutes GIVEN a start: trained on starts only, zero minutes impossible
+        utr = tr[tr.started == 1]
+        mfeats = MIN_FEATS + START_FEATS
+    else:
+        utr = tr[tr.universe]
+        mfeats = MIN_FEATS
+    members = fit_minutes(utr, rng, mfeats) if fit_minutes_model else None
+    bucket_vals = {k: utr.minutes[utr.bucket == k].to_numpy(float) for k in range(1, K)}
+    dcfit = None
+    if ts >= "2025-26":
+        dcfit = fit_dc(tr)
+        coefs.append(pd.DataFrame({"fold": ts, "component": "defensive_contribution", "term": dcfit["names"],
+                                   "beta": dcfit["beta"], "se": np.sqrt(np.diag(dcfit["cov"]))}))
+    cal = None
+    if cal_kind and pool is not None and len(pool):
+        pool = pool[pool.season < ts]
+        cal = {"goal_open": fit_calibration(pool, "ehat_goal_open", "tgt_np_goals", cal_kind),
+               "assist": fit_calibration(pool, "ehat_assist", "assists", cal_kind)}
+        cal["n_pool"] = len(pool)
+    return {"season": ts, "cond_start": cond_start, "cal_kind": cal_kind, "pri": pri, "kmap": kmap, "fits": fits,
+            "bonus_fit": bonus_fit, "conv_ab": (pg + 1, pa - pg + 1), "conv": pg / pa, "s_team": team_sigma(tr),
+            "members": members, "mfeats": mfeats, "bucket_vals": bucket_vals, "dc": dcfit, "cal": cal,
+            "coefs": pd.concat(coefs), "n_train": len(tr), "train_hash": frame_hash(tr)}
+
+
+def predict_rows(M, te, rng, Pmin=None):
+    """Simulate xP for rows `te` (master-table schema; outcomes optional) with the fitted season model M.
+    Pmin: minutes-bucket probabilities (B_MIN, n, K) if already computed. Returns (results, features, Pmin)."""
+    Fte_eb, Ste = eb_features(te, M["kmap"])
+    Fte = pd.concat([fixed_features(te, M["pri"]), Fte_eb], axis=1)
+    if Pmin is None:
+        Pmin = predict_minutes(M["members"], te, M["mfeats"])
+    dc = None if M["dc"] is None else {"fit": M["dc"], "X": dc_design(te, M["dc"]["prior"]).to_numpy()}
+    Xte = pd.concat([te, Fte], axis=1)
+    Xte = Xte.loc[:, ~Xte.columns.duplicated()].assign(const=1.0)
+    bv = M["bucket_vals"]
+    mbar = np.array([0.0] + [bv[k].mean() for k in range(1, K)])
+    Pm = Pmin.mean(0)
+    ehat = {"goal_open": expected_hat(M["fits"]["goal_open"], Xte, Pm, mbar),
+            "assist": expected_hat(M["fits"]["assist"], Xte, Pm, mbar)}
+    slope = None
+    if M["cal"] is not None:
+        slope = {k: (M["cal"][k]["params"], M["cal"][k]["cov"], calibration_basis(M["cal"][k], ehat[k]))
+                 for k in ("goal_open", "assist")}
+        fx_ = {k: np.exp(v[2] @ v[0]).mean() / ehat[k].mean() for k, v in slope.items()}
+        print(f"  {M['season']}: {M['cal_kind']} calibration from {M['cal']['n_pool']:,} earlier out-of-sample rows; "
+              f"mean factor goals {fx_['goal_open']:.3f}, assists {fx_['assist']:.3f}", flush=True)
+    res = simulate_fold(te, Fte, Ste, M["fits"], M["bonus_fit"], Pmin, bv, M["conv_ab"], M["s_team"], M["season"],
+                        rng, dc=dc, slope=slope, ehat=ehat)
+    res["ehat_goal_open"], res["ehat_assist"] = ehat["goal_open"], ehat["assist"]
+    res["minutes_ens_sd_pplay"] = (1 - Pmin[:, :, 0]).std(0)
+    return res, Fte, Pmin
+
+
+def model_path(tag, ts):
+    return MODELS / f"xp_model_{tag}_{ts}.pkl"
+
+
+def save_model(M, tag):
+    import pickle
+    import subprocess
+    MODELS.mkdir(parents=True, exist_ok=True)
+    git = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    M = {**M, "tag": tag, "code_commit": git.stdout.strip(),
+         "created_utc": pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")}
+    with open(model_path(tag, M["season"]), "wb") as f:
+        pickle.dump(M, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def load_model(tag, ts):
+    import pickle
+    with open(model_path(tag, ts), "rb") as f:
+        return pickle.load(f)
+
+
 # ------------------------------------------------------------------ main
 def main():
     import sys
@@ -638,6 +777,7 @@ def main():
     use_slope = "--no-cal" not in sys.argv
     curve = use_slope and "--slope" not in sys.argv
     cal = "" if curve else "_slope" if use_slope else "_nocal"
+    cal_kind = None if not use_slope else "spline" if curve else "linear"
     tag = mode + ("" if cond_start else "_uncond") + cal
     variant = cal
     d = load("2025-26" if sealed else "2026-27" if live else "2024-25")
@@ -651,86 +791,33 @@ def main():
     cache = OUT / "cache"
     cache.mkdir(exist_ok=True)
     for ts in folds:
-        # common random numbers: every variant uses the same seed for the same fold
-        rng = np.random.default_rng(SEED + 7 * int(ts[:4]) + (10 if cond_start else 0))
         if cond_start:
             tr, te = d[d.season < ts], d[(d.season == ts) & (d.started == 1)]
         else:
             tr, te = d[d.season < ts], d[(d.season == ts) & d.universe]
-        assert tr.season.max() < ts
-        pri = priors(tr)
-        kmap = estimate_k_full(H, int(ts[:4]) - 1)
-        Ftr = pd.concat([fixed_features(tr, pri), eb_features(tr, kmap)[0]], axis=1)
-        Fte_fixed = fixed_features(te, pri)
-        Fte_eb, Ste = eb_features(te, kmap)
-        Fte = pd.concat([Fte_fixed, Fte_eb], axis=1)
-        trF = pd.concat([tr, Ftr], axis=1)
-        app = trF[trF.minutes > 0]
-        fits = {}
-        for name, spec in GLM_SPECS.items():
-            rows = app if spec["rows"] == "app" else app[app.position == "GKP"]
-            rows = rows[rows[spec["y"]].notna()]
-            fits[name] = fit_glm(rows, spec)
-            terms = fits[name]["names"]
-            coefs.append(pd.DataFrame({"fold": ts, "component": name, "term": terms,
-                                       "beta": fits[name]["beta"], "se": np.sqrt(np.diag(fits[name]["cov"]))}))
-        bonus_fit = fit_bonus(app, Ftr, cond_start, np.random.default_rng(SEED + int(ts[:4])))
-        coefs.append(pd.DataFrame({"fold": ts, "component": "bonus_rank", "term": BONUS_X, "beta": bonus_fit["beta"],
-                                   "se": np.sqrt(np.diag(bonus_fit["cov"]))}))
-        pa, pg = app.tgt_pen_att.sum(), app.tgt_pen_goals.sum()
-        conv_ab = (pg + 1, pa - pg + 1)
-        s_team = team_sigma(tr)
-        if cond_start:   # minutes GIVEN a start: trained on starts only, zero minutes impossible
-            utr = tr[tr.started == 1]
-            mfeats = MIN_FEATS + START_FEATS
-        else:
-            utr = tr[tr.universe]
-            mfeats = MIN_FEATS
+        # calibration pool: this run's earlier folds + earlier OOS predictions of the same variant
+        prior = [r_ for r_ in results]
+        if mode != "dev":
+            for f_ in ([f"dev{variant}"] + ([f"sealed{variant}"] if live else [])):
+                fp = OUT / f"xp_predictions_{f_}.parquet"
+                if fp.exists():
+                    prior.append(pd.read_parquet(fp))
+        pool = pd.concat(prior) if prior else None
         cfile = cache / f"pmin_{'start' if cond_start else 'uncond'}_{ts}.npy"
-        if "--reuse-minutes" in sys.argv and cfile.exists():
+        reuse = "--reuse-minutes" in sys.argv and cfile.exists()
+        M = fit_season(tr, ts, cond_start, H, pool, cal_kind, fit_minutes_model=not reuse)
+        coefs.append(M["coefs"])
+        Pmin = None
+        if reuse:
             Pmin = np.load(cfile)
             assert Pmin.shape[1] == len(te), "minutes cache does not match the test rows"
         else:
-            members = fit_minutes(utr, rng, mfeats)
-            Pmin = predict_minutes(members, te, mfeats)
-            np.save(cfile, Pmin)
-        bucket_vals = {k: utr.minutes[utr.bucket == k].to_numpy(float) for k in range(1, K)}
-        dc = None
-        if ts >= "2025-26":
-            dcfit = fit_dc(tr)
-            dc = {"fit": dcfit, "X": dc_design(te, dcfit["prior"]).to_numpy()}
-            coefs.append(pd.DataFrame({"fold": ts, "component": "defensive_contribution", "term": dcfit["names"],
-                                       "beta": dcfit["beta"], "se": np.sqrt(np.diag(dcfit["cov"]))}))
-        Xte = pd.concat([te, Fte], axis=1)
-        Xte = Xte.loc[:, ~Xte.columns.duplicated()].assign(const=1.0)
-        mbar = np.array([0.0] + [bucket_vals[k].mean() for k in range(1, K)])
-        Pm = Pmin.mean(0)
-        ehat = {"goal_open": expected_hat(fits["goal_open"], Xte, Pm, mbar),
-                "assist": expected_hat(fits["assist"], Xte, Pm, mbar)}
-        slope = None
-        if use_slope:
-            prior = [r_ for r_ in results]
-            if mode != "dev":   # earlier OOS predictions of the same variant from the development run(s)
-                for f_ in ([f"dev{variant}"] + ([f"sealed{variant}"] if live else [])):
-                    fp = OUT / f"xp_predictions_{f_}.parquet"
-                    if fp.exists():
-                        prior.append(pd.read_parquet(fp))
-            pool = pd.concat(prior) if prior else None
-            if pool is not None and len(pool):
-                pool = pool[pool.season < ts]
-                kind = "spline" if curve else "linear"
-                slope = {"goal_open": fit_slope(pool, "ehat_goal_open", "tgt_np_goals", ehat["goal_open"], kind),
-                         "assist": fit_slope(pool, "ehat_assist", "assists", ehat["assist"], kind)}
-                fx_ = {k: np.exp(v[2] @ v[0]).mean() / ehat[k].mean() for k, v in slope.items()}
-                print(f"  {ts}: {kind} calibration from {len(pool):,} earlier out-of-sample rows; mean factor goals "
-                      f"{fx_['goal_open']:.3f}, assists {fx_['assist']:.3f}", flush=True)
+            save_model(M, tag)
         rng_sim = np.random.default_rng(SEED + 7 * int(ts[:4]) + 1000)   # same simulation stream for every variant
-        res = simulate_fold(te, Fte, Ste, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team, ts, rng_sim, dc=dc,
-                            slope=slope, ehat=ehat)
-        res["ehat_goal_open"], res["ehat_assist"] = ehat["goal_open"], ehat["assist"]
-        res["minutes_ens_sd_pplay"] = (1 - Pmin[:, :, 0]).std(0)
+        res, Fte, Pmin = predict_rows(M, te, rng_sim, Pmin)
+        np.save(cfile, Pmin)
         results.append(pd.concat([te, Fte.add_prefix("feat_")], axis=1).join(res))
-        print(f"  fold {ts}: s_team={s_team:.3f} conv={pg/pa:.3f} rows={len(te):,} "
+        print(f"  fold {ts}: s_team={M['s_team']:.3f} conv={M['conv']:.3f} rows={len(te):,} "
               f"mean xP={res.xp.mean():.3f} actual={te.total_points.mean():.3f}", flush=True)
     R_ = pd.concat(results)
     R_.to_parquet(OUT / f"xp_predictions_{tag}.parquet", index=False)

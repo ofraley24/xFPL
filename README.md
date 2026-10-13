@@ -50,6 +50,10 @@ comparison) -> `analysis/18` (audit).
 | `18_audit.py` | leakage audit: truncation test at the gameweek deadline, single-feature scan, protocol and integrity checks |
 | `19_compare_variants.py` | first high-end round: baseline vs within-match goal dependence vs calibration slope (historical record) |
 | `20_high_end_fixes.py` | second high-end round: before / pre-registered fixes / final, by scoring component and position |
+| `21_regression_check.py` | xP outputs of the current code against a frozen baseline (exact) |
+| `22_build_horizon_rows.py` | horizon rows: player-fixtures 1-8 gameweeks ahead with features and ratings frozen at the earlier deadline; h = 1 reproduces the master table |
+| `23_audit_horizon.py` | truncation test of the horizon rows (`docs/AUDIT_HORIZON.md`) |
+| `24_predict_horizons.py` | predicts the horizon rows with the saved fold models (`data/models/`) |
 
 Decision time is the gameweek deadline. No feature uses information recorded after it.
 

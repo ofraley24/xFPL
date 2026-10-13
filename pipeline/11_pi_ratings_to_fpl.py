@@ -181,6 +181,27 @@ def tidy(d, label):
     return pd.DataFrame(rows)
 
 
+def asof_ratings(pl, deadlines, model, horizon, label):
+    """Played fixtures rated AS OF EARLIER DEADLINES (horizon backtest): the fixture of gameweek r is rated
+    from the snapshot taken just before the deadline of gameweek t = r - h + 1, for h = 1..horizon.
+    h = 1 is the usual rating (own deadline). Two rows (home, away) per fixture and h, with asof_round and
+    horizon."""
+    pieces = []
+    for h in range(1, horizon + 1):
+        q = pl.assign(asof_round=pl.event - (h - 1), horizon=h)
+        q = q[q.asof_round >= 1].copy()
+        q["asof_deadline"] = [deadlines.get((s_, e_)) for s_, e_ in zip(q.season, q.asof_round)]
+        q = q[q.asof_deadline.notna()].copy()
+        vals = [lambdas_from_snapshot(model.snapshots[dl_], h_, v_, c_)
+                for dl_, h_, v_, c_ in zip(q.asof_deadline, q.us_home, q.us_away, q.closed)]
+        q[["lam", "mu", "home_att", "home_def", "away_att", "away_def"]] = np.array(vals)
+        t = tidy(q, label)
+        for c in ("asof_round", "asof_deadline", "horizon"):
+            t[c] = np.repeat(q[c].to_numpy(), 2)
+        pieces.append(t)
+    return pd.concat(pieces, ignore_index=True)
+
+
 def load_matches_with_clock():
     """matches_unified with a match clock `t`: FPL's exact kickoff for EPL matches (Understat times in early
     seasons are up to 12 h off), Understat's time elsewhere; sorted by (t, league, home_team)."""
@@ -219,6 +240,9 @@ def main():
     ap.add_argument("--bcd-prior-n", type=float, default=50.0)
     ap.add_argument("--drift-lr", type=float, default=0.0, help="online league scoring-level drift")
     ap.add_argument("--ha-lr", type=float, default=0.0, help="online (crowd) home-advantage drift")
+    ap.add_argument("--horizon", type=int, default=0,
+                    help="also rate played fixtures as of the deadlines 1..N gameweeks earlier "
+                         "(fpl_team_fixture_ratings_asof.csv)")
     a = ap.parse_args()
     out_dir = Path(a.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -273,6 +297,10 @@ def main():
     vals = [lambdas_from_snapshot(model.snapshots[dl_], h_, v_, c_)
             for dl_, h_, v_, c_ in zip(pl.deadline, pl.us_home, pl.us_away, pl.closed)]
     pl[["lam", "mu", "home_att", "home_def", "away_att", "away_def"]] = np.array(vals)
+
+    if a.horizon:
+        asof_ratings(pl, deadlines, model, a.horizon, a.label).to_csv(
+            out_dir / "fpl_team_fixture_ratings_asof.csv", index=False)
 
     cur_season = fx.season.iloc[0]
     played_ids = set(pl[pl.season == cur_season].fixture)

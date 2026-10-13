@@ -8,6 +8,9 @@ before S). Seasons up to 2018-19 use the pre-2019 choice. 2025-26 and 2026-27 us
 before 2025-26. Each season's FPL fixture ratings are then taken from a replay with that season's
 settings, so every rating is one that could have been computed at the time.
 Output: data/ratings_eval/fpl_team_fixture_ratings.csv (+ selection table in docs/).
+Options: --reuse-selection (take the drift settings from docs/ratings_asof_selection.csv instead of re-running
+the search), --horizon N (also fpl_team_fixture_ratings_asof.csv: played fixtures rated as of the deadlines
+1..N gameweeks earlier, for the horizon backtest).
 """
 import importlib.util
 import json
@@ -31,6 +34,16 @@ HA = (0.0, 0.0005, 0.001, 0.002, 0.004)
 
 def main():
     params = json.load(open(PARAMS))
+    horizon = int(sys.argv[sys.argv.index("--horizon") + 1]) if "--horizon" in sys.argv else 0
+    if "--reuse-selection" in sys.argv:
+        prev = pd.read_csv(ROOT / "docs" / "ratings_asof_selection.csv")
+        sel = {int(r.season[:4]): (r.drift_lr, r.ha_lr) for r in prev.itertuples()}
+    else:
+        sel = select_drift(params)
+    build(sel, horizon)
+
+
+def select_drift(params):
     m = R11.load_matches_with_clock()   # FPL kickoff clock for EPL; same ordering as the ratings script
     sel = {}
     for y in range(2019, 2026):
@@ -49,6 +62,10 @@ def main():
         print(f"season {y}-{str(y+1)[2:]}: chosen drift_lr={best[1]} ha_lr={best[2]} (NLL on {score.sum()} matches)", flush=True)
     sel_tab = pd.DataFrame([{"season": f"{y}-{str(y+1)[2:]}", "drift_lr": v[0], "ha_lr": v[1]} for y, v in sel.items()])
     sel_tab.to_csv(ROOT / "docs" / "ratings_asof_selection.csv", index=False)
+    return sel
+
+
+def build(sel, horizon=0):
     # seasons <= 2018-19: pre-2019 choice (drift chosen pre-2019 in 16_covid_team_eval.py = 0.002, ha = 0)
     combos = {(0.002, 0.0)} | set(sel.values())
     outs = {}
@@ -57,19 +74,21 @@ def main():
         out = ROOT / "data" / "ratings_tmp" / tag
         subprocess.run([sys.executable, str(ROOT / "pipeline/11_pi_ratings_to_fpl.py"), "--params", str(PARAMS),
                         "--label", f"pre2019+covid({tag})", "--out", str(out), "--bcd", "--drift-lr", str(dl),
-                        "--ha-lr", str(ha)], check=True, capture_output=True)
+                        "--ha-lr", str(ha)] + (["--horizon", str(horizon)] if horizon else []),
+                       check=True, capture_output=True)
         outs[(dl, ha)] = pd.read_csv(out / "fpl_team_fixture_ratings.csv")
-    pieces = []
-    seasons = sorted(outs[(0.002, 0.0)].season.unique())
-    for s in seasons:
-        y = int(s[:4])
-        key = (0.002, 0.0) if y < 2019 else sel[min(y, 2025)]
-        t = outs[key]
-        pieces.append(t[t.season == s])
-    allr = pd.concat(pieces, ignore_index=True)
+        if horizon:
+            outs[(dl, ha, "asof")] = pd.read_csv(out / "fpl_team_fixture_ratings_asof.csv")
     dst = ROOT / "data" / "ratings_eval"
     dst.mkdir(exist_ok=True)
+    seasons = sorted(outs[(0.002, 0.0)].season.unique())
+    key = lambda s: (0.002, 0.0) if int(s[:4]) < 2019 else sel[min(int(s[:4]), 2025)]
+    allr = pd.concat([outs[key(s)][outs[key(s)].season == s] for s in seasons], ignore_index=True)
     allr.to_csv(dst / "fpl_team_fixture_ratings.csv", index=False)
+    if horizon:
+        t_ = lambda s: outs[key(s) + ("asof",)]
+        pd.concat([t_(s)[t_(s).season == s] for s in seasons], ignore_index=True).to_csv(
+            dst / "fpl_team_fixture_ratings_asof.csv", index=False)
     print(allr.groupby("season").params_label.first().to_string())
 
 

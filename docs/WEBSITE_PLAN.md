@@ -39,19 +39,25 @@ Mac (launchd)                                         xfpl-web (static)
 
 ## Work packages
 
-### WP1. Separate fitting from prediction (research repo)
-- Split `13_xp_model.py` into `fit` (per season; saves fitted components, calibration spline, minutes
-  ensemble, coefficient draws, with a hash of the training data) and `predict` (any table of rows with the
-  feature schema). The dev / sealed / live evaluation must reproduce the current
-  `xp_predictions_*.parquet` exactly under common random numbers. That is the regression test.
-- Refactor the feature code in `06` and `12` into functions of `(history, as_of_deadline, target_fixtures)`
-  so the same code builds rows for finished fixtures (evaluation) and unplayed ones (forecast).
-  Fixture-context features (home, rest days, next gap, fixtures in the gameweek, supremacy / total) come
-  from the schedule and the ratings. Player features are those at `as_of_deadline`.
+### WP1. Separate fitting from prediction (research repo). DONE 2026-10-13
+- `13_xp_model.py` now has `fit_season` (once per season; saved to `data/models/xp_model_<tag>_<season>.pkl`
+  with a hash of the training data and the code commit) and `predict_rows` (any rows with the master
+  schema; outcomes optional). Regression test `21_regression_check.py`: dev, sealed and live outputs
+  (predictions and coefficients) are identical to the frozen pre-split baseline.
+- Horizon rows without new feature code (`22_build_horizon_rows.py`): the master table already holds each
+  player's state at every deadline (the first row at or after it, the double-gameweek rule generalised).
+  Counts are copied, the clock and decayed sums move on to the target kickoff, Understat form is recomputed
+  with 12's own as-of join, and team ratings are frozen at the deadline (`pipeline/11 --horizon`, via
+  `17 --reuse-selection --horizon 8`). Rows with h = 1 reproduce `master.parquet` exactly in every season.
+  Truncation test for h >= 2: `23_audit_horizon.py`, all PASS (`docs/AUDIT_HORIZON.md`).
+- Live forecast rows (WP3) reuse the same construction: the anchor is then a placeholder row for the next
+  gameweek built by 06/12 from the snapshot, and the targets are the schedule's unplayed fixtures.
 - Double gameweeks: every fixture gets the deadline features (the existing rule). Blank gameweeks: no rows.
   Fixtures without a gameweek (postponed) are listed as unscheduled and not forecast.
 
 ### WP2. Horizon backtest (research repo, before the site uses horizons > 1)
+Pre-registration: `docs/HORIZON_PLAN.md` (rule awaiting confirmation). Predictions:
+`24_predict_horizons.py` (saved fold models; h = 1 reproduces the walk-forward predictions exactly).
 Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PLAN.md`:
 - **Rows:** for each deadline t of each test season and each h = 1..8, every player who **started** a
   fixture in gameweek t + h, with player features and team ratings both as of deadline t. h = 1 is the
