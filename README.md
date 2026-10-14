@@ -56,6 +56,7 @@ comparison) -> `analysis/18` (audit).
 | `24_predict_horizons.py` | predicts the horizon rows with the saved fold models (`data/models/`) |
 | `25_score_horizons.py` | scores the horizon backtest against the pre-registered rule (`docs/HORIZON_RESULTS*.md`) |
 | `../pipeline/weekly_refresh.py` | the weekly pre-deadline run: new results in (incremental crosswalk and ratings), features rebuilt, forecast out; `--full` for the reference rebuild |
+| `../pipeline/auto_refresh.py` | launchd job (every 2 h): runs the weekly refresh as soon as FPL marks the last gameweek finished and checked |
 | `26_forecast.py` | live forecast: xP given a start for every registered player's fixtures in the next 8 gameweeks, features frozen at the next deadline; QC gates; writes `data/forecasts/forecast_<season>_gw<t>_<snapshot>.json` for the website |
 
 Decision time is the gameweek deadline. No feature uses information recorded after it.

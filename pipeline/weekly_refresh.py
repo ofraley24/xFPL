@@ -5,6 +5,7 @@
     python pipeline/weekly_refresh.py              # incremental (default), ~10 min
     python pipeline/weekly_refresh.py --full       # full crosswalk and ratings rebuild (reference check)
     python pipeline/weekly_refresh.py --no-fetch   # reuse the local Understat cache and FPL snapshots
+    python pipeline/weekly_refresh.py --fresh-snapshot   # always take a new full FPL snapshot (auto_refresh.py)
 
 Steps (each timed; log in data/logs/weekly_refresh_<UTC>.log):
   1  FPL snapshot: reuse the latest full snapshot if it is under 12 h old, else take a new one (~5 min)
@@ -80,7 +81,7 @@ def main():
     print(f"weekly refresh ({'full' if full else 'incremental'}); log {r.log}")
 
     age = latest_full_snapshot_age_h()
-    if fetch and (age is None or age > 12):
+    if fetch and ("--fresh-snapshot" in sys.argv or age is None or age > 12):
         r.run("pipeline/06_fetch_fpl_live.py")
     else:
         print(f"       reusing latest full FPL snapshot ({age:.1f} h old)")

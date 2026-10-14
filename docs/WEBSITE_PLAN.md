@@ -131,7 +131,12 @@ Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PL
   forecast is ~5-6 min. `--full` runs the reference rebuild.
 - Further speed-ups, not done: the forecast rebuilds 06/12 itself (could write master instead of the separate step),
   the bench-player match copies simulate 22 rows to get 1, and 02/02b/05 rebuild all six leagues' Understat files.
-- Not yet scheduled: running weekly_refresh.py automatically before each deadline (needs the owner's OK).
+- Scheduled 2026-10-14 (owner's request: as early in the week as the sources allow): `pipeline/auto_refresh.py`,
+  launchd `com.xfpl.auto_refresh`, checks FPL every 2 h and runs `weekly_refresh.py --fresh-snapshot` once the
+  previous gameweek is finished AND data_checked by FPL (typically the morning after the last match) and the next
+  deadline is more than an hour away; retries every 2 h if a source lags (gates fail, nothing published); records
+  success per deadline in `data/logs/auto_refresh_state.json`, copies the forecast into ../xfpl-web and shows a
+  macOS notification. Log: `data/logs/auto_refresh.log`.
 - Done: FPL snapshot twice a day (see Decisions), logs in `data/logs/fpl_snapshot.log`.
 - Make the weekly refresh INCREMENTAL (today it rebuilds everything, ~15 min + ~5 min forecast): the model
   is never refitted mid-season, and features only depend on earlier rows, so append the new gameweek's rows
