@@ -25,7 +25,7 @@ def compare(a, b, what, atol=0.0):
     if set(a.columns) != set(b.columns):
         probs.append(f"{what}: columns differ: new {sorted(set(a.columns) - set(b.columns))}, "
                      f"missing {sorted(set(b.columns) - set(a.columns))}")
-    for c in sorted(set(a.columns) & set(b.columns)):
+    for c in sorted(set(a.columns) & set(b.columns) - {"row_id"}):   # row_id: a running number that shifts when rows are added
         x, y = a[c].to_numpy(), b[c].to_numpy()
         if np.issubdtype(x.dtype, np.number) and np.issubdtype(y.dtype, np.number):
             x, y = x.astype(float), y.astype(float)
