@@ -15,7 +15,7 @@ Steps (each timed; log in data/logs/weekly_refresh_<UTC>.log):
   4  match table, crosswalk (--incremental: only fixtures not yet matched), team ratings for the current
      season only (17 --current-only; earlier seasons are rated from their own deadline snapshots)
   5  features: scorer dataset (01), minutes (06), master (12)
-  6  forecast (analysis/26_forecast.py): writes nothing unless every gate passes; stats sheet (27_export_stats.py)
+  6  track record of finished forecasts (29), forecast (26: writes nothing unless every gate passes), stats sheet (27)
 Incremental steps were checked against the full rebuild on 2026-10-14 (identical files); run --full now and
 then to keep that true.
 """
@@ -109,6 +109,7 @@ def main():
     r.run("analysis/06_build_minutes_dataset.py")
     r.run("analysis/12_build_master.py")
 
+    r.run("analysis/29_track_record.py")   # score forecasts whose gameweek has finished
     r.run("analysis/26_forecast.py")
     r.run("analysis/27_export_stats.py")
     print(f"\ndone in {(time.time() - t0) / 60:.1f} min; log {r.log}")

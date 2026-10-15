@@ -57,6 +57,8 @@ comparison) -> `analysis/18` (audit).
 | `25_score_horizons.py` | scores the horizon backtest against the pre-registered rule (`docs/HORIZON_RESULTS*.md`) |
 | `../pipeline/weekly_refresh.py` | the weekly pre-deadline run: new results in (incremental crosswalk and ratings), features rebuilt, forecast out; `--full` for the reference rebuild |
 | `27_export_stats.py` | stats sheet for the website: current-season player and team statistics (FPL, Understat, model ratings), season and last-4-gameweek windows, shot maps |
+| `28_export_evidence.py` | the validation results as chart data for the website's method pages (same definitions as 15 and 25) |
+| `29_track_record.py` | live track record: each archived pre-deadline forecast scored after its gameweek, against FPL's own projection from the same snapshot and at the deadline |
 | `../pipeline/auto_refresh.py` | launchd job (every 2 h): runs the weekly refresh as soon as FPL marks the last gameweek finished and checked |
 | `26_forecast.py` | live forecast: xP given a start for every registered player's fixtures in the next 8 gameweeks, features frozen at the next deadline; QC gates; writes `data/forecasts/forecast_<season>_gw<t>_<snapshot>.json` for the website |
 
