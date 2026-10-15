@@ -79,7 +79,9 @@ def main():
         per["forecast_snapshot"], per["deadline_snapshot"] = snap, before[-1] if before else None
         rows.append(per)
     out = {"generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "season": season_now,
-           "rows": "player-gameweeks in which the player started every fixture", "gameweeks": [], "overall": None}
+           "rows": "player-gameweeks in which the player started every fixture", "gameweeks": [], "overall": None,
+           "locked": [{"gw": int(gw), "snapshot": snap, "deadline": deadlines[gw].strftime("%Y-%m-%dT%H:%MZ"),
+                       "scored": bool(gw in finished)} for gw, (_f, snap) in sorted(latest.items())]}
     if rows:
         all_ = pd.concat(rows, ignore_index=True).dropna(subset=["fpl_same", "fpl_deadline"])
         for gw, g in all_.groupby("gw"):
