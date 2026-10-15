@@ -100,6 +100,16 @@ def main():
                       int(fx_round.get(x.fixture, 0)), x.situation == "Penalty"] for x in g.itertuples()]
                 for el, g in shp.groupby("element")}
 
+    def recent(g, n=6):
+        """The player's last n team fixtures, appearances or not (most recent first)."""
+        rows = g.sort_values("kickoff_time").tail(n).iloc[::-1]
+        return [{"gw": int(x["round"]), "opp": int(x.opponent_team), "home": str(x.was_home) == "True",
+                 "mins": int(x.minutes), "start": int(x.starts), "g": int(x.goals_scored), "a": int(x.assists),
+                 "xg": r(x.xG, 3), "xa": r(x.xA, 3), "shots": int(x.shots), "kp": int(x.kp), "cs": int(x.clean_sheets),
+                 "bonus": int(x.bonus), "pts": int(x.total_points),
+                 "score": f"{int(x.team_h_score)}-{int(x.team_a_score)}" if pd.notna(x.team_h_score) else None}
+                for _, x in rows.iterrows()]
+
     el = pd.DataFrame(boot["elements"])
     el = el[el.element_type.isin(POS)]
     by_el = {e: g for e, g in pm.groupby("element")}
@@ -111,7 +121,7 @@ def main():
         players.append({"id": int(e.id), "name": e.web_name, "team": int(e.team), "pos": POS[int(e.element_type)],
                         "price": e.now_cost / 10, "own": float(e.selected_by_percent), "status": e.status,
                         "form": float(e.form), "s": {w: agg(g[g["round"].isin(rs)]) for w, rs in windows.items()},
-                        "shots": shots_by.get(e.id, [])})
+                        "shots": shots_by.get(e.id, []), "recent": recent(g)})
 
     # ---- teams: Understat team-match stats (by crosswalk name) and model ratings
     txw = pd.read_csv(DATA / "crosswalk" / "team_crosswalk.csv")
