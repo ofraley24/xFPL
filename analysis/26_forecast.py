@@ -24,6 +24,7 @@ Output: data/forecasts/forecast_<season>_gw<t>_<snapshot>.json (+ .parquet). Opt
 import importlib.util
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,7 +38,7 @@ os.environ.setdefault("XFPL_RATINGS", str(DATA / "ratings_eval"))
 RATINGS = Path(os.environ["XFPL_RATINGS"])
 FORECASTS = DATA / "forecasts"
 POS = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-SCHEMA = 2
+SCHEMA = 3   # 3: availability (p_start, p_sub), xP given a substitute appearance, the full mixture
 
 
 def load_mod(name, path):
@@ -52,6 +53,8 @@ M12 = load_mod("m12", "analysis/12_build_master.py")
 H22 = load_mod("h22", "analysis/22_build_horizon_rows.py")
 X13 = load_mod("x13", "analysis/13_xp_model.py")
 R21 = load_mod("r21", "analysis/21_regression_check.py")
+A30 = load_mod("a30", "analysis/30_availability.py")
+F31 = load_mod("f31", "analysis/31_full_xp.py")
 
 
 def latest_snapshot(name=None):
@@ -88,8 +91,9 @@ def league_yellow_at(hist, deadline, days=365):
     return float(np.log(90 * w.yellow_cards.sum() / mins))
 
 
-def match_sets(d, avail):
-    """Simulation rows: per fixture a probable-XI match, plus one copy per other player (see header)."""
+def match_sets(d, avail, every=False):
+    """Simulation rows: per fixture a probable-XI match, plus one copy per other player (see header).
+    every=True (substitute run): every player, XI included, gets his own copy and is its only focal row."""
     key = d.assign(_av=d.element.map(avail).fillna(True).astype(int), _st=d.st_n10.fillna(0), _m5=d.m5.fillna(0))
     idx, sim_fx, focal, in_xi = [], [], [], []
 
@@ -106,19 +110,55 @@ def match_sets(d, avail):
             xi = list(s.index[s.position == "GKP"][:1]) + list(s.index[s.position != "GKP"][:10])
             sides[home] = (xi, [i for i in s.index if i not in xi])
         xi_all = [i for v in sides.values() for i in v[0]]
-        add(xi_all, f * 1000, set(xi_all), True)
-        k = 1
+        k = 0
+        if not every:
+            add(xi_all, f * 1000, set(xi_all), True)
+            k = 1
         for home, (xi, bench) in sides.items():
             other = [i for h, v in sides.items() if h != home for i in v[0]]
-            for p in bench:
-                same = [i for i in xi if d.position[i] == d.position[p]]
-                pool = same or [i for i in xi if d.position[i] != "GKP"]
-                rows = [i for i in xi if i != pool[-1]] + [p] + other
-                add(rows, f * 1000 + k, {p}, False)
+            for p in (xi + bench) if every else bench:
+                if p in xi:
+                    rows = xi + other
+                else:
+                    same = [i for i in xi if d.position[i] == d.position[p]]
+                    pool = same or [i for i in xi if d.position[i] != "GKP"]
+                    rows = [i for i in xi if i != pool[-1]] + [p] + other
+                add(rows, f * 1000 + k, {p}, p in xi)
                 k += 1
     S = d.loc[idx].reset_index().rename(columns={"index": "row"})
     S["sim_fixture"], S["focal"], S["in_xi"] = sim_fx, focal, in_xi
     return S
+
+
+RETURN = re.compile(r"(?:Expected back|Suspended until)\s+(\d{1,2})\s+([A-Z][a-z]{2})")
+
+
+def apply_flags(out, el, snap_t, t):
+    """FPL availability flags (docs/AVAILABILITY_PLAN.md, D; a heuristic: no flag history exists before
+    October 2026). A return date in the news zeroes every fixture before it; injured / suspended / not available
+    without a date zeroes the next gameweek; chance of playing scales the next gameweek's P(start), P(sub)."""
+    out = out.copy()
+    k = np.ones(len(out))
+    for i, (pid, ko, rnd) in enumerate(zip(out.element, out.kickoff_time, out["round"])):
+        e = el.loc[pid]
+        m = RETURN.search(e.news or "")
+        if m:
+            back = pd.Timestamp(f"{m.group(1)} {m.group(2)} {snap_t.year}")
+            if back < snap_t - pd.Timedelta(days=60):
+                back = pd.Timestamp(f"{m.group(1)} {m.group(2)} {snap_t.year + 1}")
+            ko = pd.Timestamp(ko)
+            if (ko.tz_convert(None) if ko.tzinfo else ko) < back:
+                k[i] = 0.0
+                continue
+        if rnd == t:
+            if e.status in ("i", "s", "n") and not m:
+                k[i] = 0.0
+            elif not pd.isna(e.chance_of_playing_next_round):
+                k[i] = min(k[i], e.chance_of_playing_next_round / 100)
+    out["p_start"], out["p_sub"] = out.p_start * k, out.p_sub * k
+    out["p_none"] = 1 - out.p_start - out.p_sub
+    out["flag_scale"] = k
+    return out
 
 
 def main():
@@ -227,6 +267,52 @@ def main():
     mx = out[out.in_xi.astype(bool)].xp.mean()
     gate("G6 mean xP of probable starters within [2.5, 4.5]", 2.5 <= mx <= 4.5, f"{mx:.3f}")
 
+    # ---- availability: P(start), P(sub), P(none) (30_availability.py, docs/AVAILABILITY_PLAN.md)
+    A = A30.load_live(season)
+    atr = master[(master.season < season) & master.position.isin(A30.POS)]
+    gate("G7 availability model's training data unchanged", A30.frame_hash(atr) == A["train_hash"],
+         f"availability model {A['season']} commit {A['code_commit']}")
+    P = A30.predict_live(A, out)
+    out["p_none"], out["p_start"], out["p_sub"] = P[:, 0], P[:, 1], P[:, 2]
+    out = apply_flags(out, el, snap_t, t)
+    ps_xi = out[out.in_xi.astype(bool) & (out["round"] == t)].p_start.mean()
+    gate("G7 probabilities valid", bool(np.allclose(out[["p_none", "p_start", "p_sub"]].sum(1), 1) and
+                                        (out[["p_none", "p_start", "p_sub"]].to_numpy() >= -1e-12).all()))
+    gate("G7 mean P(start) of probable starters (next gameweek) within [0.6, 0.97]", 0.6 <= ps_xi <= 0.97, f"{ps_xi:.3f}")
+
+    # ---- points given a substitute appearance: every player in his own copy, substitute minutes (31_full_xp.py)
+    S2 = match_sets(d, avail, every=True)
+    te2 = S2.drop(columns=["fixture"]).rename(columns={"sim_fixture": "fixture"})
+    Pmin2 = X13.predict_minutes(M["members"], te2, M["mfeats"])
+    sp = F31.sub_bucket_probs(tr, season, d.five_subs.mode().iloc[0])
+    foc = S2.focal.to_numpy()
+    Pmin2[:, foc, :] = np.stack([sp[pos] for pos in S2.position[foc]])[None, :, :]
+    J0, X13.J = X13.J, 10            # 10 parameter draws for the substitute run (means and PMFs; 31's setting)
+    print(f"simulating {len(S2):,} rows in {S2.sim_fixture.nunique():,} substitute copies ...", flush=True)
+    res2, _, _ = X13.predict_rows(M, te2, np.random.default_rng(seed + 1), Pmin2, want_pmf=True)
+    X13.J = J0
+    sub = pd.concat([S2[["row", "focal"]], res2[["xp", "pmf", "e_minutes"]]], axis=1)
+    sub = sub[sub.focal].set_index("row").sort_index()
+    gate("G8 one substitute prediction per player-fixture", sub.index.is_unique and len(sub) == len(out))
+    out["xp_sub"], out["pmf_sub"], out["e_minutes_sub"] = sub.xp, sub.pmf, sub.e_minutes
+
+    # ---- the full expectation and its distribution (mixture over start / substitute / no appearance)
+    ps, pb, pn = out.p_start.to_numpy(), out.p_sub.to_numpy(), out.p_none.to_numpy()
+    Ps, Pb = np.stack(out.pmf), np.stack(out.pmf_sub)
+    Pf = ps[:, None] * Ps + pb[:, None] * Pb
+    Pf[:, -X13.PMF_LO] += pn
+    out["xp_full"] = ps * out.xp + pb * out.xp_sub
+    out["pmf_full"] = list(Pf)
+    grid = np.arange(X13.PMF_LO, X13.PMF_HI + 1)
+    cdf = Pf.cumsum(1)
+    for q in (10, 50, 90):
+        out[f"q{q}_full"] = grid[(cdf >= q / 100 - 1e-9).argmax(1)]
+    out["p_ge5_full"], out["p_ge10_full"] = Pf[:, grid >= 5].sum(1), Pf[:, grid >= 10].sum(1)
+    gate("G8 mixture distribution consistent with the full expectation",
+         bool(np.allclose(Pf.sum(1), 1) and np.allclose(Pf @ grid, out.xp_full, atol=0.02)))
+    gate("G8 xP given a substitute appearance within [0, 6]", bool(out.xp_sub.between(0, 6).all()),
+         f"range {out.xp_sub.min():.2f}-{out.xp_sub.max():.2f}")
+
     ok = all(g[1] for g in gates)
     print(f"\n{sum(g[1] for g in gates)}/{len(gates)} gates passed")
     if dry or not ok:
@@ -249,7 +335,8 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
             "kickoff_time", "in_xi", "xp", "var_total", "var_epi", "var_ale", "q10", "q25", "q50", "q75", "q90",
             "p_ge2", "p_ge5", "p_ge10", "e_app", "e_goals", "e_assists", "e_cs", "e_gc_pts", "e_saves_pts", "e_bonus",
             "e_yellow", "e_red", "e_og", "e_pen_miss", "e_pen_saved", "e_minutes", "e_dc", "value", "xg_for_pi",
-            "xg_against_pi"]
+            "xg_against_pi", "p_none", "p_start", "p_sub", "flag_scale", "xp_sub", "e_minutes_sub", "xp_full",
+            "q10_full", "q50_full", "q90_full", "p_ge5_full", "p_ge10_full"]
     out[keep].to_parquet(FORECASTS / f"{stem}.parquet", index=False)
 
     def pmf_json(v):
@@ -290,9 +377,16 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
                           "p5": r3(r.p_ge5), "p10": r3(r.p_ge10), "var_ale": r3(r.var_ale), "sd_epi": r3(np.sqrt(max(r.var_epi, 0))),
                           "parts": {k: r3(r[f"e_{k}"]) for k in ("app", "goals", "assists", "cs", "gc_pts", "saves_pts",
                                                                "bonus", "dc", "yellow", "red", "og", "pen_miss", "pen_saved")},
-                          "pmf": pmf_json(r.pmf)}
+                          "pmf": pmf_json(r.pmf),
+                          "p_start": r3(r.p_start), "p_sub": r3(r.p_sub), "xp_sub": r3(r.xp_sub),
+                          "full": {"xp": r3(r.xp_full), "q10": int(r.q10_full), "q50": int(r.q50_full),
+                                   "q90": int(r.q90_full), "p5": r3(r.p_ge5_full), "p10": r3(r.p_ge10_full),
+                                   "pmf": pmf_json(r.pmf_full)}}
                          for _, r in g.iterrows()]})
     doc = {"schema_version": SCHEMA, "target": "expected FPL points GIVEN THAT THE PLAYER STARTS",
+           "full_target": ("expected FPL points over start / substitute appearance / no appearance: "
+                           "p_start x xp + p_sub x xp_sub (docs/AVAILABILITY_PLAN.md); FPL availability flags "
+                           "applied as a heuristic"),
            "season": season, "deadline_gw": t, "deadline_utc": deadline.strftime("%Y-%m-%dT%H:%MZ"),
            "gameweeks": rounds, "snapshot_utc": snap_name,
            "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

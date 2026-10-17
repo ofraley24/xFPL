@@ -29,7 +29,8 @@ CONSTRUCTION (no new feature code; the master table already holds the state at e
   outcomes the target row's (minutes, points, events, started): used only for evaluation.
 
 CHECK: rows with h = 1 must equal master.parquet (relative tolerance 1e-9 for decayed sums, exact otherwise); the script stops if they do not.
-Output: data/analysis/horizon_rows.parquet (starters only unless --all), one row per (asof_round, player,
+Output: data/analysis/horizon_rows.parquet (starters only; --all: every registered player, to
+horizon_rows_all.parquet), one row per (asof_round, player,
 fixture). Options: --horizon N (default 8), --seasons 2019-20,2020-21,... (default 2019-20..2025-26: the
 current season is excluded because its fixtures played after the last Understat refresh are not in the
 crosswalk and carry current-state ratings in the master table, so they cannot be rated as of a deadline).
@@ -185,8 +186,9 @@ def main():
     if bad:
         sys.exit("h = 1 rows do not reproduce the master table; nothing written")
     R = pd.concat(out, ignore_index=True).drop(columns=["mrow", "anchor_row"])
-    R.to_parquet(OUT / "horizon_rows.parquet", index=False)
-    print(f"saved {len(R):,} rows -> {OUT / 'horizon_rows.parquet'}")
+    f = OUT / ("horizon_rows_all.parquet" if keep_all else "horizon_rows.parquet")
+    R.to_parquet(f, index=False)
+    print(f"saved {len(R):,} rows -> {f}")
 
 
 if __name__ == "__main__":
