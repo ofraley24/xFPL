@@ -8,8 +8,8 @@ Each check reads FPL's gameweek list (one request, nothing saved). The refresh r
 It then runs pipeline/weekly_refresh.py --fresh-snapshot. If a source lags (e.g. Understat has not posted the
 last match), the forecast gates fail, nothing is published, and the next check tries again. On success the
 deadline is recorded in data/logs/auto_refresh_state.json, the newest forecast is copied into the website
-(../xfpl-web, if present) and deployed to Cloudflare Pages (`npm run deploy`, which refuses unless the site is behind
-Cloudflare Access; a failed deploy is logged and does not fail the refresh), and a macOS notification is shown.
+(../xfpl-web, if present) and deployed to Cloudflare Pages (`npm run deploy`; the site is public; a failed deploy
+is logged and does not fail the refresh), and a macOS notification is shown.
 Options: --dry-run (report the decision only), --force (run even if already done for this deadline).
 """
 import fcntl
