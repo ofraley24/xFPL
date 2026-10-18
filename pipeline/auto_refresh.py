@@ -8,11 +8,13 @@ Each check reads FPL's gameweek list (one request, nothing saved). The refresh r
 It then runs pipeline/weekly_refresh.py --fresh-snapshot. If a source lags (e.g. Understat has not posted the
 last match), the forecast gates fail, nothing is published, and the next check tries again. On success the
 deadline is recorded in data/logs/auto_refresh_state.json, the newest forecast is copied into the website
-(../xfpl-web, if present) and a macOS notification is shown.
+(../xfpl-web, if present) and deployed to Cloudflare Pages (`npm run deploy`, which refuses unless the site is behind
+Cloudflare Access; a failed deploy is logged and does not fail the refresh), and a macOS notification is shown.
 Options: --dry-run (report the decision only), --force (run even if already done for this deadline).
 """
 import fcntl
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -77,8 +79,15 @@ def main():
         state["done_deadline"] = nxt["deadline_time"]
         if WEB.exists():
             subprocess.run([NODE, "scripts/sync-data.mjs"], cwd=WEB, check=False)
+            # launchd's PATH lacks /usr/local/bin, where node, npm and npx live
+            env = {**os.environ, "PATH": f"{Path(NODE).parent}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
+            with open(LOGS / "deploy.log", "a") as fh:
+                deploy_rc = subprocess.run(["npm", "run", "deploy"], cwd=WEB, env=env, stdout=fh,
+                                           stderr=subprocess.STDOUT).returncode
+            log(f"deploy rc={deploy_rc} (log data/logs/deploy.log)")
         log(f"done: forecast for GW{nxt['id']} written")
-        notify("xFPL", f"GW{nxt['id']} forecast is ready")
+        notify("xFPL", f"GW{nxt['id']} forecast is ready" + ("" if not WEB.exists() or deploy_rc == 0
+                                                              else "; site deploy failed, see deploy.log"))
     else:
         log(f"refresh failed (rc={rc}); will retry at the next check")
         if state.get("notified_fail") != nxt["deadline_time"]:

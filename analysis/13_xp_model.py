@@ -793,7 +793,7 @@ def main():
     cal = "" if curve else "_slope" if use_slope else "_nocal"
     cal_kind = None if not use_slope else "spline" if curve else "linear"
     tag = mode + ("" if cond_start else "_uncond") + cal
-    variant = cal
+    variant = ("" if cond_start else "_uncond") + cal   # calibration pool = earlier predictions of the SAME target
     d = load("2025-26" if sealed else "2026-27" if live else "2024-25")
     print(f"RUN {tag}: folds {folds}; conditional on starting: {cond_start}", flush=True)
     print(f"rows {len(d):,}; universe share {d.universe.mean():.3f}", flush=True)
