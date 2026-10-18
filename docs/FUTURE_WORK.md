@@ -5,12 +5,6 @@ prioritised later. Results referred to are in docs/HIGH_END_PLAN.md, docs/HORIZO
 evaluation reports.
 
 ## Not yet completed (availability work, started 2026-10-17)
-- **Website toggle (xfpl-web).** Read forecast schema 3 (`p_start`, `p_sub`, `xp_sub`, `full`); a toggle between
-  "xP · if starts" (default) and the full model on every view that ranks or sums xP; the Risk & upside page to
-  show the full mixture distribution (the spike at 0 for rotation risks); labels that the availability flags
-  are a heuristic and that intervals summed over gameweeks are not validated; update src/types.ts.
-- **Evidence for the site.** Export the availability and full-xP validation (calibration, horizons, ranking)
-  for the method pages (28_export_evidence.py), once the backtest is complete.
 - **Track record of the full model.** Score archived schema-3 forecasts after each gameweek with the full
   expectation as well as the start-conditional one (29_track_record.py).
 - **Findings of the full-mixture backtest (docs/FULL_XP_RESULTS.md, all six development seasons, 2026-10-18).**
