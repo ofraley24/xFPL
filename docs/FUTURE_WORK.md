@@ -5,9 +5,6 @@ prioritised later. Results referred to are in docs/HIGH_END_PLAN.md, docs/HORIZO
 evaluation reports.
 
 ## Not yet completed (availability work, started 2026-10-17)
-- **Finish the full-mixture backtest.** `31_full_xp.py` has scored 2024-25 only (actual/predicted 0.983,
-  mixture PIT 0.507 / 0.809, within-GW rank correlation over all players 0.60 vs 0.53 for form); 2019-20 to
-  2023-24 are running. Then write docs/FULL_XP_RESULTS.md from all six seasons and check the sanity rule.
 - **Website toggle (xfpl-web).** Read forecast schema 3 (`p_start`, `p_sub`, `xp_sub`, `full`); a toggle between
   "xP · if starts" (default) and the full model on every view that ranks or sums xP; the Risk & upside page to
   show the full mixture distribution (the spike at 0 for rotation risks); labels that the availability flags
@@ -16,10 +13,16 @@ evaluation reports.
   for the method pages (28_export_evidence.py), once the backtest is complete.
 - **Track record of the full model.** Score archived schema-3 forecasts after each gameweek with the full
   expectation as well as the start-conditional one (29_track_record.py).
-- **Observations from the 2024-25 backtest to confirm on all seasons:** predicted substitute minutes 2.4
-  minutes too long (20.9 vs 18.6); the lowest P(start) deciles over-predicted by about 20% (small absolute
-  values); defenders and goalkeepers over-predicted by 7-10% in the full model (consistent with the known
-  2024-25 clean-sheet drift).
+- **Findings of the full-mixture backtest (docs/FULL_XP_RESULTS.md, all six development seasons, 2026-10-18).**
+  Overall actual/predicted 0.988 (sanity rule passes; every season 0.967-1.000), mixture PIT 0.501 / 0.799,
+  within-GW rank correlation over all players 0.58 vs 0.50 for form. Three errors remain, by season:
+  - Substitute minutes predicted too long in every season (by 1.9-4.0 minutes; 21.5 vs 18.9 overall).
+  - The lowest fifth of P(start) is over-predicted only from 2022-23 (actual/predicted 0.75-0.80;
+    0.98-1.07 before), i.e. since five substitutes: the five-substitute era has fewer seasons to learn from.
+  - Defenders (0.92-0.93) and goalkeepers (0.87-0.96) over-predicted from 2022-23, in line with the
+    clean-sheet drift; earlier seasons are within 3% except goalkeepers in 2021-22 (0.95).
+  - Points given a substitute appearance are well calibrated overall (0.997); goalkeepers (26 appearances,
+    0.73) are too few to judge.
 - **Long-horizon availability.** After recalibration, mean P(start) runs 2-3% high at h = 6-8 (0.324 vs 0.314
   at h = 8).
 

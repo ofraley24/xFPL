@@ -6,46 +6,46 @@ Plan (written before any run): docs/AVAILABILITY_PLAN.md, parts B and C. Script:
 
 |     |   appearances |   actual pts |   xP | sub |   actual/predicted |   actual min |   predicted min |
 |:----|--------------:|-------------:|-----------:|-------------------:|-------------:|----------------:|
-| DEF |           630 |        1.022 |      1.071 |              0.955 |       19.319 |          21.903 |
-| FWD |           469 |        1.443 |      1.536 |              0.94  |       17.446 |          19.846 |
-| GKP |             4 |        1     |      1.474 |              0.678 |       40.75  |          41.022 |
-| MID |          1881 |        1.365 |      1.379 |              0.99  |       18.523 |          20.845 |
-| all |          2984 |        1.305 |      1.339 |              0.974 |       18.552 |          20.939 |
+| DEF |          2845 |        1.067 |      1.112 |              0.959 |       19.838 |          23.176 |
+| FWD |          3017 |        1.515 |      1.511 |              1.003 |       17.771 |          20.48  |
+| GKP |            26 |        1.077 |      1.48  |              0.728 |       42     |          44.433 |
+| MID |          8600 |        1.354 |      1.347 |              1.006 |       18.874 |          21.223 |
+| all |         14488 |        1.331 |      1.335 |              0.997 |       18.875 |          21.493 |
 
 Flag: outside +-15% for GKP.
 
-For comparison, starters: actual/predicted 0.973 (8,258 starts).
+For comparison, starters: actual/predicted 0.988 (49,430 starts).
 
 ## C. The full expectation (all players with minutes in their previous 10 fixtures)
 
-**Sanity rule (overall actual/predicted within +-5%): PASS** (0.983; 17,562 player-fixtures).
+**Sanity rule (overall actual/predicted within +-5%): PASS** (0.988; 101,821 player-fixtures).
 
 By decile of P(start):
 
-|                  |     0 |     1 |     2 |     3 |     4 |    5 |     6 |     7 |     8 |     9 |
-|:-----------------|------:|------:|------:|------:|------:|-----:|------:|------:|------:|------:|
-| p_start          | 0.027 | 0.068 | 0.127 | 0.214 | 0.344 | 0.53 | 0.703 | 0.813 | 0.886 | 0.94  |
-| xp_full          | 0.204 | 0.461 | 0.786 | 1.113 | 1.513 | 2.01 | 2.465 | 2.81  | 3.007 | 3.455 |
-| actual           | 0.164 | 0.349 | 0.65  | 1.087 | 1.549 | 2.05 | 2.456 | 2.735 | 2.994 | 3.49  |
-| actual/predicted | 0.807 | 0.757 | 0.827 | 0.977 | 1.024 | 1.02 | 0.996 | 0.974 | 0.996 | 1.01  |
+|                  |     0 |     1 |     2 |     3 |     4 |     5 |     6 |     7 |     8 |     9 |
+|:-----------------|------:|------:|------:|------:|------:|------:|------:|------:|------:|------:|
+| p_start          | 0.03  | 0.075 | 0.142 | 0.239 | 0.378 | 0.572 | 0.734 | 0.83  | 0.896 | 0.943 |
+| xp_full          | 0.209 | 0.47  | 0.79  | 1.145 | 1.594 | 2.162 | 2.583 | 2.842 | 3.058 | 3.51  |
+| actual           | 0.181 | 0.423 | 0.715 | 1.122 | 1.6   | 2.209 | 2.534 | 2.805 | 3.072 | 3.476 |
+| actual/predicted | 0.866 | 0.899 | 0.905 | 0.979 | 1.004 | 1.022 | 0.981 | 0.987 | 1.004 | 0.99  |
 
 By position:
 
 | position   |   rows |   xP full |   actual |   actual/predicted |
 |:-----------|-------:|----------:|---------:|-------------------:|
-| DEF        |   6111 |     1.59  |    1.484 |              0.933 |
-| FWD        |   1946 |     2.001 |    2.07  |              1.035 |
-| GKP        |   1242 |     2.178 |    1.969 |              0.904 |
-| MID        |   8263 |     1.814 |    1.844 |              1.017 |
+| DEF        |  35854 |     1.704 |    1.633 |              0.958 |
+| FWD        |  13174 |     1.968 |    2.003 |              1.018 |
+| GKP        |   6830 |     2.429 |    2.292 |              0.943 |
+| MID        |  45963 |     1.813 |    1.829 |              1.009 |
 
 Ranking all players (every universe player-fixture, starters or not):
 
 | predictor                  |   within-GW rank corr |     RMSE |   top-10 by GW: mean actual |
 |:---------------------------|----------------------:|---------:|----------------------------:|
-| full xP                    |                0.6012 |   2.3491 |                      5.6368 |
-| xP given a start           |                0.2257 | nan      |                      4.8105 |
-| form (last 5, zeros incl.) |                0.5252 |   2.5594 |                      4.7737 |
+| full xP                    |                0.5841 |   2.4381 |                      5.2352 |
+| xP given a start           |                0.1985 | nan      |                      4.6493 |
+| form (last 5, zeros incl.) |                0.5026 |   2.6571 |                      4.4304 |
 
-Mixture distribution, randomised PIT: central 50% 0.507, central 80% 0.809 (nominal 0.50 / 0.80).
+Mixture distribution, randomised PIT: central 50% 0.501, central 80% 0.799 (nominal 0.50 / 0.80).
 
-Players outside the universe (no minutes in their previous 10 fixtures) are predicted 0: 9,721 player-fixtures, 324 appearances, 1.6% of all points scored.
+Players outside the universe (no minutes in their previous 10 fixtures) are predicted 0: 54,005 player-fixtures, 1,869 appearances, 1.9% of all points scored.
