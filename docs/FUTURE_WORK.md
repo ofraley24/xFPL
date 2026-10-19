@@ -5,8 +5,9 @@ prioritised later. Results referred to are in docs/HIGH_END_PLAN.md, docs/HORIZO
 evaluation reports.
 
 ## Not yet completed (availability work, started 2026-10-17)
-- **Track record of the full model.** Score archived schema-3 forecasts after each gameweek with the full
-  expectation as well as the start-conditional one (29_track_record.py).
+- **Track record of the full model: built 2026-10-19.** 29_track_record.py scores every registered player
+  (played or not) with the full model against FPL's ep_next, next to the starters-only comparison; the site's
+  Track record page shows both. First real scores after gameweek 7 (the first schema-3 forecast).
 - **Findings of the full-mixture backtest (docs/FULL_XP_RESULTS.md, all six development seasons, 2026-10-18).**
   Overall actual/predicted 0.988 (sanity rule passes; every season 0.967-1.000), mixture PIT 0.501 / 0.799,
   within-GW rank correlation over all players 0.58 vs 0.50 for form. Three errors remain, by season:

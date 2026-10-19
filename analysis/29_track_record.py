@@ -7,6 +7,10 @@ forecast's gameweek-t xP is compared with what happened and with FPL's own proje
   * FPL, at the deadline: ep_next from the last snapshot before the deadline (later team news; a tougher test).
 Rows: player-gameweeks in which the player STARTED every fixture of the gameweek (our xP is conditional on starting;
 FPL's ep_next also prices the chance of not playing, which these rows remove). Double gameweeks are summed.
+FULL MODEL (forecasts from schema 3 on): every registered player in the forecast, whether he played or not (0
+points if he did not), scored with our full expectation P(start) x xP|start + P(sub) x xP|sub. This is the like-for-
+like comparison with FPL's ep_next, which also prices availability. Gameweeks whose forecast predates schema 3 have
+no full-model section.
 Metrics per gameweek and cumulatively: bias, MAE, RMSE, within-gameweek Spearman rank correlation, the mean actual
 points of each method's top 10, and actual/predicted. Output: data/forecasts/track_record.json.
 """
@@ -61,25 +65,34 @@ def main():
         m = NAME.match(f.name)
         if m and m.group(1) == season_now:
             latest[int(m.group(2))] = (f, m.group(3))   # sorted: later snapshot wins
-    rows = []
+    rows, full_rows = [], []
     for gw, (f, snap) in sorted(latest.items()):
         if gw not in finished:
             continue
-        fc = pd.read_parquet(f, columns=["round", "element", "fixture", "xp"])
+        cols = ["round", "element", "fixture", "xp"]
+        has_full = "xp_full" in pd.read_parquet(f).columns
+        fc = pd.read_parquet(f, columns=cols + (["xp_full"] if has_full else []))
         fc = fc[fc["round"] == gw]
         act = master[(master.season == season_now) & (master["round"] == gw)]
         j = fc.merge(act, on=["element", "fixture"], how="inner")
-        per = j.groupby("element").agg(xp=("xp", "sum"), actual=("total_points", "sum"), n=("fixture", "size"),
-                                       started=("started", "min")).reset_index()
-        per = per[per.started == 1]
+        agg = {"xp": ("xp", "sum"), "actual": ("total_points", "sum"), "n": ("fixture", "size"),
+               "started": ("started", "min"), "minutes": ("minutes", "sum")}
+        if has_full:
+            agg["xp_full"] = ("xp_full", "sum")
+        per = j.groupby("element").agg(**agg).reset_index()
         before = [s for s in snaps if snap_t[s] < deadlines[gw]]
         per["fpl_same"] = per.element.map(ep_next(snap, gw))
         per["fpl_deadline"] = per.element.map(ep_next(before[-1], gw)) if before else np.nan
         per["gw"] = gw
         per["forecast_snapshot"], per["deadline_snapshot"] = snap, before[-1] if before else None
-        rows.append(per)
+        if has_full:
+            full_rows.append(per.copy())          # every registered player, played or not
+        rows.append(per[per.started == 1])
     out = {"generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "season": season_now,
            "rows": "player-gameweeks in which the player started every fixture", "gameweeks": [], "overall": None,
+           "full_rows": ("every registered player-gameweek in the forecast, played or not (0 points if not); our "
+                         "full model P(start) x xP|start + P(sub) x xP|sub against FPL's ep_next"),
+           "full_gameweeks": [], "full_overall": None,
            "locked": [{"gw": int(gw), "snapshot": snap, "deadline": deadlines[gw].strftime("%Y-%m-%dT%H:%MZ"),
                        "scored": bool(gw in finished)} for gw, (_f, snap) in sorted(latest.items())]}
     if rows:
@@ -90,8 +103,20 @@ def main():
                                      "fpl_same": metrics(g, "fpl_same"), "fpl_deadline": metrics(g, "fpl_deadline")})
         out["overall"] = {"n": int(len(all_)), "gws": int(all_.gw.nunique()), "model": metrics(all_, "xp"),
                           "fpl_same": metrics(all_, "fpl_same"), "fpl_deadline": metrics(all_, "fpl_deadline")}
+    if full_rows:
+        allf = pd.concat(full_rows, ignore_index=True).dropna(subset=["fpl_same", "fpl_deadline"])
+        for gw, g in allf.groupby("gw"):
+            out["full_gameweeks"].append({"gw": int(gw), "n": int(len(g)), "played": int((g.minutes > 0).sum()),
+                                          "model": metrics(g, "xp_full"), "fpl_same": metrics(g, "fpl_same"),
+                                          "fpl_deadline": metrics(g, "fpl_deadline")})
+        out["full_overall"] = {"n": int(len(allf)), "gws": int(allf.gw.nunique()), "model": metrics(allf, "xp_full"),
+                               "fpl_same": metrics(allf, "fpl_same"), "fpl_deadline": metrics(allf, "fpl_deadline")}
     FC.mkdir(parents=True, exist_ok=True)
     (FC / "track_record.json").write_text(json.dumps(out, separators=(",", ":")))
+    if out["full_overall"]:
+        print(f"full model, all players: MAE {out['full_overall']['model']['mae']} vs FPL "
+              f"{out['full_overall']['fpl_same']['mae']}; rank {out['full_overall']['model']['rank']} vs "
+              f"{out['full_overall']['fpl_same']['rank']}")
     print(f"track record: {len(out['gameweeks'])} scored gameweeks"
           + (f"; overall model MAE {out['overall']['model']['mae']} vs FPL {out['overall']['fpl_same']['mae']}" if out["overall"] else
              f" (forecasts waiting: {sorted(latest)}; finished: {sorted(g for g in latest if g in finished)})"))
