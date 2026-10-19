@@ -61,7 +61,7 @@ comparison) -> `analysis/18` (audit).
 | `29_track_record.py` | live track record: each archived pre-deadline forecast scored after its gameweek, against FPL's own projection from the same snapshot and at the deadline |
 | `30_availability.py` | availability model: P(start), P(sub), P(no appearance) per player-fixture (multinomial logistic regression, walk-forward, per-horizon recalibration); saves the live model (`docs/AVAILABILITY_PLAN.md`, `docs/AVAILABILITY_RESULTS.md`) |
 | `31_full_xp.py` | xP given a substitute appearance and the full expectation P(start) x xP\|start + P(sub) x xP\|sub, backtested on the development seasons (`docs/FULL_XP_RESULTS.md`) |
-| `../pipeline/auto_refresh.py` | launchd job (every 2 h): runs the weekly refresh as soon as FPL marks the last gameweek finished and checked |
+| `../pipeline/auto_refresh.py` | launchd job (every 10 min): runs the weekly refresh as soon as FPL marks the last gameweek finished (points final on the FPL site), once more when FPL marks it data-checked, and deploys the site |
 | `26_forecast.py` | live forecast: xP given a start for every registered player's fixtures in the next 8 gameweeks, features frozen at the next deadline; also P(start), P(sub) (with FPL's availability flags as a heuristic), xP given a substitute appearance and the full mixture distribution; QC gates; writes `data/forecasts/forecast_<season>_gw<t>_<snapshot>.json` for the website |
 
 Decision time is the gameweek deadline. No feature uses information recorded after it.

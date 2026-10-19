@@ -137,6 +137,11 @@ Design, to be fixed in writing before the run, in the style of `docs/HIGH_END_PL
   deadline is more than an hour away; retries every 2 h if a source lags (gates fail, nothing published); records
   success per deadline in `data/logs/auto_refresh_state.json`, copies the forecast into ../xfpl-web and shows a
   macOS notification. Log: `data/logs/auto_refresh.log`.
+- Changed 2026-10-19 (owner: "the website updated as soon as the points are populated on the FPL website"):
+  checks every 10 min (launchd StartInterval 600); runs as soon as FPL marks the gameweek FINISHED (bonus added,
+  the site's points are in) instead of waiting for data_checked, then once more when data_checked arrives to pick up
+  FPL's late corrections; after a failed attempt waits 30 min before retrying. Checks do not run while the Mac
+  sleeps, so the Mac must stay awake on power for this to be prompt.
 - Done: FPL snapshot twice a day (see Decisions), logs in `data/logs/fpl_snapshot.log`.
 - Make the weekly refresh INCREMENTAL (today it rebuilds everything, ~15 min + ~5 min forecast): the model
   is never refitted mid-season, and features only depend on earlier rows, so append the new gameweek's rows
