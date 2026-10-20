@@ -17,7 +17,8 @@ Within-bucket minutes are the model's own (start) values.
 DRAWS. J = 10 parameter draws x R = 25 (live: 40 x 25); means are unaffected.
 Output: data/analysis/full_xp/full_xp_<season>.parquet (one row per universe player-fixture: xP and CDF at
 the outcome for start and sub). --report scores B and C into docs/FULL_XP_RESULTS.md.
-Options: --seasons a,b (default the development seasons), --report.
+Options: --seasons a,b (default the development seasons; 2025-26 uses its sealed model), --report (development
+seasons only).
 """
 import importlib.util
 import sys
@@ -98,7 +99,7 @@ def sub_bucket_probs(tr, ts, te_era):
 
 
 def run_season(ts, full):
-    M = X13.load_model("dev", ts)
+    M = X13.load_model("sealed" if ts == "2025-26" else "dev", ts)
     d = full[(full.season == ts) & full.universe].reset_index(drop=True)
     tr = full[full.season < ts]
     era = d.five_subs.mode().iloc[0]
@@ -131,7 +132,7 @@ def form_baseline(master):
 
 
 def report():
-    F = pd.concat([pd.read_parquet(p) for p in sorted(FX.glob("full_xp_*.parquet"))], ignore_index=True)
+    F = pd.concat([pd.read_parquet(FX / f"full_xp_{s}.parquet") for s in DEV], ignore_index=True)
     A = pd.read_parquet(OUT / "availability_predictions.parquet",
                         columns=["season", "element", "fixture", "p_none", "p_start", "p_sub", "cls"])
     F = F.merge(A, on=["season", "element", "fixture"], how="left", validate="one_to_one")
@@ -205,7 +206,7 @@ def main():
         report()
         return
     seasons = args[args.index("--seasons") + 1].split(",") if "--seasons" in args else DEV
-    full = X13.load("2024-25")
+    full = X13.load(max(seasons))
     for ts in seasons:
         run_season(ts, full)
 
