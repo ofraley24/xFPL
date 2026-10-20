@@ -38,7 +38,7 @@ os.environ.setdefault("XFPL_RATINGS", str(DATA / "ratings_eval"))
 RATINGS = Path(os.environ["XFPL_RATINGS"])
 FORECASTS = DATA / "forecasts"
 POS = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-SCHEMA = 3   # 3: availability (p_start, p_sub), xP given a substitute appearance, the full mixture
+SCHEMA = 4   # 3: availability (p_start, p_sub), xP given a substitute appearance, the full mixture; 4: event probabilities
 
 
 def load_mod(name, path):
@@ -291,10 +291,13 @@ def main():
     print(f"simulating {len(S2):,} rows in {S2.sim_fixture.nunique():,} substitute copies ...", flush=True)
     res2, _, _ = X13.predict_rows(M, te2, np.random.default_rng(seed + 1), Pmin2, want_pmf=True)
     X13.J = J0
-    sub = pd.concat([S2[["row", "focal"]], res2[["xp", "pmf", "e_minutes"]]], axis=1)
+    PROB_COLS = ["p_g1", "p_a1", "e_cs", "e_dc", "p_b1", "p_sv1", "e_yellow"]
+    sub = pd.concat([S2[["row", "focal"]], res2[["xp", "pmf", "e_minutes"] + PROB_COLS]], axis=1)
     sub = sub[sub.focal].set_index("row").sort_index()
     gate("G8 one substitute prediction per player-fixture", sub.index.is_unique and len(sub) == len(out))
     out["xp_sub"], out["pmf_sub"], out["e_minutes_sub"] = sub.xp, sub.pmf, sub.e_minutes
+    for c in PROB_COLS:   # event probabilities given a substitute appearance
+        out[f"{c}_sub"] = sub[c]
 
     # ---- the full expectation and its distribution (mixture over start / substitute / no appearance)
     ps, pb, pn = out.p_start.to_numpy(), out.p_sub.to_numpy(), out.p_none.to_numpy()
@@ -378,6 +381,11 @@ def write(out, el, boot, fixtures, season, t, deadline, rounds, snap_name, M, ga
                           "parts": {k: r3(r[f"e_{k}"]) for k in ("app", "goals", "assists", "cs", "gc_pts", "saves_pts",
                                                                "bonus", "dc", "yellow", "red", "og", "pen_miss", "pen_saved")},
                           "pmf": pmf_json(r.pmf),
+                          # event probabilities given a start, and given a substitute appearance (full model mixes them)
+                          "probs": {"g": r3(r.p_g1), "g2": r3(r.p_g2), "a": r3(r.p_a1), "cs": r3(r.e_cs), "dc": r3(r.e_dc),
+                                    "b": r3(r.p_b1), "b3": r3(r.p_b3), "sv": r3(r.p_sv1), "yc": r3(r.e_yellow)},
+                          "probs_sub": {"g": r3(r.p_g1_sub), "a": r3(r.p_a1_sub), "cs": r3(r.e_cs_sub), "dc": r3(r.e_dc_sub),
+                                        "b": r3(r.p_b1_sub), "sv": r3(r.p_sv1_sub), "yc": r3(r.e_yellow_sub)},
                           "p_start": r3(r.p_start), "p_sub": r3(r.p_sub), "xp_sub": r3(r.xp_sub),
                           "full": {"xp": r3(r.xp_full), "q10": int(r.q10_full), "q50": int(r.q50_full),
                                    "q90": int(r.q90_full), "p5": r3(r.p_ge5_full), "p10": r3(r.p_ge10_full),

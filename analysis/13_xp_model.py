@@ -532,6 +532,8 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
                                       "e_yellow", "e_red", "e_og", "e_pen_miss", "e_pen_saved", "e_minutes", "p_play",
                                       "p60", "e_dc", "p_g1", "p_g2")}
     pmf = np.zeros((n, PMF_HI - PMF_LO + 1), dtype=np.float32) if want_pmf else None
+    if want_pmf:   # forecast mode: event probabilities for the website (counted from the same draws; evaluation output unchanged)
+        comp.update({k: np.zeros(n) for k in ("p_a1", "p_b1", "p_b3", "p_sv1")})
     dc_on = dc is not None and season >= "2025-26"   # defensive-contribution points exist from 2025-26
     Xall = pd.concat([te, F], axis=1)
     Xall = Xall.loc[:, ~Xall.columns.duplicated()]
@@ -658,6 +660,9 @@ def simulate_fold(te, F, S, fits, bonus_fit, Pmin, bucket_vals, conv_ab, s_team,
                          ("e_pen_saved", pensv), ("e_minutes", mins), ("p_play", played), ("p60", m60),
                          ("e_dc", dc_hit), ("p_g1", goals >= 1), ("p_g2", goals >= 2)):
             comp[key][sl] = arr.reshape(nn, -1).mean(1)
+        if want_pmf:
+            for key, arr in (("p_a1", assists >= 1), ("p_b1", bonus >= 1), ("p_b3", bonus >= 3), ("p_sv1", saves >= 3)):
+                comp[key][sl] = arr.reshape(nn, -1).mean(1)
     res = pd.DataFrame({**out, **comp}, index=te.index)
     if want_pmf:
         res["pmf"] = list(pmf)

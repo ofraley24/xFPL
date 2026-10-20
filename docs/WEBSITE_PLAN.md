@@ -159,6 +159,10 @@ forecast JSON (schema 2: adds ownership, team fixtures with expected goals, and 
 distribution `pmf`). Tabs: Planner, Fixtures, My squad (best XI + captain weekly, transfer finder by squad effect),
 Dream team (integer program in the browser), Captaincy (haul / blank chances, captain duel), Haul map, Simulator,
 Compare, About. See its README. Original v1 list below for reference.
+2026-10-20: schema 4 adds per player-fixture event probabilities (goal, 2+ goals, assist, clean sheet, defensive
+contribution, bonus, 3 bonus, save points, yellow), given a start and given a substitute appearance, from the same
+simulation (forecast mode only; evaluation output unchanged). The site adds a Scoring events page, a transfer window
+toggle in My squad and season stats with positional percentiles in the player card.
 - **Stack:** Vite + React + TypeScript, a table library (TanStack Table) and a small chart library. Static
   build, run locally for now (no hosting needed while it is personal). Forecast files are gitignored in the
   web repo.
