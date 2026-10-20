@@ -1,4 +1,4 @@
-# Data QC report (2026-10-14)
+# Data QC report (2026-10-20)
 
 101/102 checks passed.
 
@@ -6,12 +6,12 @@
 
 | league     |   season_2026_fixtures |   played | last_played         |
 |:-----------|-----------------------:|---------:|:--------------------|
-| EPL        |                    380 |       60 | 2026-10-12 19:00:00 |
-| La_liga    |                    380 |       78 | 2026-10-12 19:00:00 |
-| Bundesliga |                    306 |       45 | 2026-10-11 15:30:00 |
-| Serie_A    |                    380 |       60 | 2026-10-12 18:45:00 |
-| Ligue_1    |                    306 |       54 | 2026-10-11 18:45:00 |
-| RFPL       |                    240 |       80 | 2026-10-11 16:30:00 |
+| EPL        |                    380 |       70 | 2026-10-19 19:00:00 |
+| La_liga    |                    380 |       88 | 2026-10-19 19:00:00 |
+| Bundesliga |                    306 |       54 | 2026-10-18 15:30:00 |
+| Serie_A    |                    380 |       70 | 2026-10-19 18:45:00 |
+| Ligue_1    |                    306 |       63 | 2026-10-18 18:45:00 |
+| RFPL       |                    240 |       88 | 2026-10-19 16:30:00 |
 
 ## Checks
 
@@ -28,9 +28,9 @@
 | C2 EPL team+date unique | PASS |  |
 | C3 EPL 2026 roster match_ids all played | PASS |  |
 | C3 EPL 2026 shot match_ids all played | PASS |  |
-| C4 EPL 2026 every played match has >=11 roster rows per side | PASS | 60/60 matches with rosters |
-| C5 EPL 2026 total goals: matches == team rows | PASS | 177 vs 177 |
-| C5 EPL 2026 shot goals+own goals == match goals | PASS | 177 vs 177 |
+| C4 EPL 2026 every played match has >=11 roster rows per side | PASS | 70/70 matches with rosters |
+| C5 EPL 2026 total goals: matches == team rows | PASS | 203 vs 203 |
+| C5 EPL 2026 shot goals+own goals == match goals | PASS | 203 vs 203 |
 | C6 EPL 2026 team names: matches vs team table | PASS | diff=[] |
 | C7 EPL shot xG in [0,1] | PASS |  |
 | C7 EPL minutes in [0,130] | PASS |  |
@@ -45,9 +45,9 @@
 | C2 La_liga team+date unique | PASS |  |
 | C3 La_liga 2026 roster match_ids all played | PASS |  |
 | C3 La_liga 2026 shot match_ids all played | PASS |  |
-| C4 La_liga 2026 every played match has >=11 roster rows per side | PASS | 78/78 matches with rosters |
-| C5 La_liga 2026 total goals: matches == team rows | PASS | 241 vs 241 |
-| C5 La_liga 2026 shot goals+own goals == match goals | PASS | 241 vs 241 |
+| C4 La_liga 2026 every played match has >=11 roster rows per side | PASS | 88/88 matches with rosters |
+| C5 La_liga 2026 total goals: matches == team rows | PASS | 270 vs 270 |
+| C5 La_liga 2026 shot goals+own goals == match goals | PASS | 270 vs 270 |
 | C6 La_liga 2026 team names: matches vs team table | PASS | diff=[] |
 | C7 La_liga shot xG in [0,1] | PASS |  |
 | C7 La_liga minutes in [0,130] | PASS |  |
@@ -62,9 +62,9 @@
 | C2 Bundesliga team+date unique | PASS |  |
 | C3 Bundesliga 2026 roster match_ids all played | PASS |  |
 | C3 Bundesliga 2026 shot match_ids all played | PASS |  |
-| C4 Bundesliga 2026 every played match has >=11 roster rows per side | PASS | 45/45 matches with rosters |
-| C5 Bundesliga 2026 total goals: matches == team rows | PASS | 172 vs 172 |
-| C5 Bundesliga 2026 shot goals+own goals == match goals | PASS | 172 vs 172 |
+| C4 Bundesliga 2026 every played match has >=11 roster rows per side | PASS | 54/54 matches with rosters |
+| C5 Bundesliga 2026 total goals: matches == team rows | PASS | 199 vs 199 |
+| C5 Bundesliga 2026 shot goals+own goals == match goals | PASS | 199 vs 199 |
 | C6 Bundesliga 2026 team names: matches vs team table | PASS | diff=[] |
 | C7 Bundesliga shot xG in [0,1] | PASS |  |
 | C7 Bundesliga minutes in [0,130] | PASS |  |
@@ -79,9 +79,9 @@
 | C2 Serie_A team+date unique | PASS |  |
 | C3 Serie_A 2026 roster match_ids all played | PASS |  |
 | C3 Serie_A 2026 shot match_ids all played | PASS |  |
-| C4 Serie_A 2026 every played match has >=11 roster rows per side | PASS | 60/60 matches with rosters |
-| C5 Serie_A 2026 total goals: matches == team rows | PASS | 172 vs 172 |
-| C5 Serie_A 2026 shot goals+own goals == match goals | PASS | 172 vs 172 |
+| C4 Serie_A 2026 every played match has >=11 roster rows per side | PASS | 70/70 matches with rosters |
+| C5 Serie_A 2026 total goals: matches == team rows | PASS | 207 vs 207 |
+| C5 Serie_A 2026 shot goals+own goals == match goals | PASS | 207 vs 207 |
 | C6 Serie_A 2026 team names: matches vs team table | PASS | diff=[] |
 | C7 Serie_A shot xG in [0,1] | PASS |  |
 | C7 Serie_A minutes in [0,130] | PASS |  |
@@ -96,9 +96,9 @@
 | C2 Ligue_1 team+date unique | PASS |  |
 | C3 Ligue_1 2026 roster match_ids all played | PASS |  |
 | C3 Ligue_1 2026 shot match_ids all played | PASS |  |
-| C4 Ligue_1 2026 every played match has >=11 roster rows per side | PASS | 54/54 matches with rosters |
-| C5 Ligue_1 2026 total goals: matches == team rows | PASS | 157 vs 157 |
-| C5 Ligue_1 2026 shot goals+own goals == match goals | **FAIL** | 153 vs 157 |
+| C4 Ligue_1 2026 every played match has >=11 roster rows per side | PASS | 63/63 matches with rosters |
+| C5 Ligue_1 2026 total goals: matches == team rows | PASS | 192 vs 192 |
+| C5 Ligue_1 2026 shot goals+own goals == match goals | **FAIL** | 188 vs 192 |
 | C6 Ligue_1 2026 team names: matches vs team table | PASS | diff=[] |
 | C7 Ligue_1 shot xG in [0,1] | PASS |  |
 | C7 Ligue_1 minutes in [0,130] | PASS |  |
@@ -113,9 +113,9 @@
 | C2 RFPL team+date unique | PASS |  |
 | C3 RFPL 2026 roster match_ids all played | PASS |  |
 | C3 RFPL 2026 shot match_ids all played | PASS |  |
-| C4 RFPL 2026 every played match has >=11 roster rows per side | PASS | 80/80 matches with rosters |
-| C5 RFPL 2026 total goals: matches == team rows | PASS | 218 vs 218 |
-| C5 RFPL 2026 shot goals+own goals == match goals | PASS | 218 vs 218 |
+| C4 RFPL 2026 every played match has >=11 roster rows per side | PASS | 88/88 matches with rosters |
+| C5 RFPL 2026 total goals: matches == team rows | PASS | 246 vs 246 |
+| C5 RFPL 2026 shot goals+own goals == match goals | PASS | 246 vs 246 |
 | C6 RFPL 2026 team names: matches vs team table | PASS | diff=[] |
 | C7 RFPL shot xG in [0,1] | PASS |  |
 | C7 RFPL minutes in [0,130] | PASS |  |

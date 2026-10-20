@@ -1,4 +1,4 @@
-# FPL <-> Understat crosswalk QC (2026-10-14)
+# FPL <-> Understat crosswalk QC (2026-10-20)
 
 ## Fixtures (FPL fixture -> Understat match)
 
@@ -14,7 +14,7 @@
 | 2023-24 |            380 |       380 |                 380 |               0 |         0 |
 | 2024-25 |            380 |       380 |                 380 |               0 |         0 |
 | 2025-26 |            380 |       380 |                 380 |               0 |         0 |
-| 2026-27 |             60 |        60 |                  60 |               0 |         0 |
+| 2026-27 |             70 |        70 |                  70 |               0 |         0 |
 
 Method used:
 
@@ -30,7 +30,7 @@ Method used:
 | 2023-24  |          265 |                115 |
 | 2024-25  |          226 |                154 |
 | 2025-26  |          224 |                156 |
-| 2026-27  |           34 |                 26 |
+| 2026-27  |           42 |                 28 |
 
 ## Teams
 
@@ -62,7 +62,7 @@ Method used:
 | 2023-24  |            11384 |     11384 | 1      |                  0.9999 |
 | 2024-25  |            11566 |     11566 | 1      |                  1      |
 | 2025-26  |            11492 |     11490 | 0.9998 |                  0.9996 |
-| 2026-27  |             1853 |      1853 | 1      |                  1      |
+| 2026-27  |             2158 |      2158 | 1      |                  0.9991 |
 
 Understat appearances that found an FPL partner:
 
@@ -94,11 +94,11 @@ Understat appearances that found an FPL partner:
 | 2023-24  |             0.7309 |        1      |          0.9819 |
 | 2024-25  |             0.7935 |        1      |          0.9854 |
 | 2025-26  |             0.7713 |        0.9999 |          0.978  |
-| 2026-27  |             0.8651 |        1      |          0.9795 |
+| 2026-27  |             0.8573 |        1      |          0.9801 |
 
 ## Evidence that does not depend on goals/assists (which are inputs to the match cost)
 
-- pairs where the NAMES alone agree (name cost <= 0.25): 99.97% of 110,531; <= 0.45: 100.00%
+- pairs where the NAMES alone agree (name cost <= 0.25): 99.97% of 110,836; <= 0.45: 100.00%
 - one-to-one persistent map: Understat ids per FPL code > 1: 0; FPL codes per Understat id > 1: 0
 - pairs that contradict the persistent map: 0
 
@@ -111,7 +111,9 @@ Weak pairs left after pass 2 (name or minutes disagree; review manually):
 | 2025-26  |       345 | jesse derry         | Jesse Derry         |            45 |           53 |           0 |
 | 2025-26  |       372 | jerome abbey        | Jerome Abbey        |            16 |            6 |           0 |
 | 2025-26  |       374 | sean neave          | Sean Neave          |            13 |            7 |           0 |
+| 2026-27  |        61 | jules ahoka         | Jules Ahoka         |            25 |           19 |           0 |
+| 2026-27  |        61 | tymur tutierov      | Tymur Tutierov      |            58 |           65 |           0 |
 
 ## Persistent map
 
-2,002 FPL codes mapped; 0 flagged as conflicts (see player_crosswalk.csv).
+2,005 FPL codes mapped; 0 flagged as conflicts (see player_crosswalk.csv).
