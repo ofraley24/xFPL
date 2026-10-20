@@ -2,8 +2,10 @@
 """Run the weekly refresh as soon as the sources have the finished gameweek (launchd, every 10 minutes).
 
 Each check reads FPL's gameweek list (one request, nothing saved). The refresh runs when
-  * the gameweek before the next deadline is FINISHED by FPL (all matches over, bonus added: the points on the
-    FPL site are in), and no successful refresh has been recorded for that deadline yet; or
+  * every match of the gameweek before the next deadline is FINISHED by FPL (match over and its bonus confirmed:
+    the points on the FPL site are in), and no successful refresh has been recorded for that deadline yet. FPL
+    sets the gameweek's own `finished` flag hours later, after ranks are updated, so waiting for it delayed the
+    site by most of a day; either signal counts; or
   * FPL has since marked it DATA_CHECKED (final stats) and the successful refresh ran before that: one more
     run picks up FPL's late corrections for the track record;
   * and the deadline is at least an hour away (decision time is the deadline; the forecast gates also refuse it),
@@ -53,8 +55,8 @@ def main():
     except OSError:
         log("another refresh is running; skipping")
         return
-    boot = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/",
-                        headers={"User-Agent": "Mozilla/5.0 (research; xFPL project)"}, timeout=30).json()
+    headers = {"User-Agent": "Mozilla/5.0 (research; xFPL project)"}
+    boot = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/", headers=headers, timeout=30).json()
     now = datetime.now(timezone.utc)
     events = sorted(boot["events"], key=lambda e: e["id"])
     upcoming = [e for e in events if datetime.fromisoformat(e["deadline_time"].replace("Z", "+00:00")) > now]
@@ -69,12 +71,18 @@ def main():
     checked = prev is None or bool(prev["data_checked"])
     # done = a successful run that already saw FPL's final (data_checked) points for this deadline
     done = done_for and (state.get("done_stage") == "checked" or not checked)
-    ready = prev is None or bool(prev["finished"])
+    matches_done = False
+    if prev is not None and not prev["finished"]:
+        fixtures = requests.get(f"https://fantasy.premierleague.com/api/fixtures/?event={prev['id']}",
+                                headers=headers, timeout=30).json()
+        matches_done = bool(fixtures) and all(f["finished"] for f in fixtures)
+    ready = prev is None or bool(prev["finished"]) or matches_done
     time_ok = deadline - now > timedelta(hours=1)
     last = state.get("last_attempt_utc")
     backoff = (state.get("last_rc", 0) != 0 and last is not None and
                now - datetime.fromisoformat(last.replace("Z", "+00:00")) < timedelta(minutes=30))
     why = (f"next GW{nxt['id']} deadline {nxt['deadline_time']}; previous GW finished={prev and prev['finished']} "
+           f"all matches finished={prev is not None and (prev['finished'] or matches_done)} "
            f"data_checked={prev and prev['data_checked']}; already done={done}" + ("; waiting after a failed attempt" if backoff else ""))
     if not ready or not time_ok or (done and not force) or (backoff and not force):
         log(f"waiting: {why}")

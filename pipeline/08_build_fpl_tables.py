@@ -64,7 +64,8 @@ def read_csv_any(path):
 
 
 def latest(pattern_dir=API):
-    dirs = sorted(p for p in pattern_dir.iterdir() if p.is_dir())
+    # a snapshot that failed mid-fetch (e.g. no network) leaves a folder without bootstrap.json: skip it
+    dirs = sorted(p for p in pattern_dir.iterdir() if p.is_dir() and (p / "bootstrap.json").exists())
     with_sum = [d for d in dirs if (d / "element_summaries.json.gz").exists()]
     return dirs, (with_sum[-1] if with_sum else None)
 
